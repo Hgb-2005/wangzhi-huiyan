@@ -1,0 +1,3061 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>网址慧眼 · 双向智能安全助手</title>
+<script>
+/* ============================================================
+   主题记忆：在 CSS 加载前先读localStorage，避免刷新时闪一下白/黑
+   ============================================================ */
+(function () {
+  try {
+    var t = localStorage.getItem('wzh_theme');
+    if (t === 'light' || t === 'dark') {
+      document.documentElement.setAttribute('data-theme', t);
+    }
+  } catch (e) { /* localStorage 不可用时忽略，走默认深色 */ }
+})();
+</script>
+<style>
+/* ============================================================
+   主题变量体系
+   ------------------------------------------------------------
+   规则：所有颜色一律引用变量，禁止再写死色值。
+   切换主题时只需给 html[data-theme="light"] 覆盖变量，
+   页面所有组件（背景/文字/输入框/按钮/表格/历史面板）自动同步。
+   ============================================================ */
+:root{
+  /* ---------- 基础色板（深色为默认）---------- */
+  --bg:#0d1117; --panel:#161b22; --panel2:#1c2129; --border:#2d333b;
+  --text:#e6edf3; --text2:#9aa7b4; --text3:#6e7681;
+  --green:#3fb950; --amber:#d29922; --red:#f85149; --blue:#58a6ff; --gray:#6e7681;
+  --blue-hover:#8cc2ff;   /* 链接 hover 态：比 --blue 更亮，深色主题下更醒目 */
+  --r:10px;
+
+  /* ---------- 语义变量：原来写死的颜色都收进来 ---------- */
+  --code-bg:#0b1017;          /* 代码块/步骤条背景 */
+  --text-code:#8fb8e8;        /* 代码/链接类文字 */
+  --text-body:#c9d1d9;        /* 正文段落文字 */
+  --text-dash:#22292f;        /* 虚线分隔线颜色 */
+  --sel-bg:#0d2b4e;           /* 选中态背景（mode按钮/chip hover） */
+  --sel-text:#8fc7ff;         /* 选中态文字 */
+  --btn-primary:#1f6feb;      /* 主按钮背景 */
+  --btn-primary-hover:#2b7bf5;
+  --on-btn:#fff;              /* 主按钮文字 */
+
+  /* 状态色：底/边框/文字 各自成套，浅色时统一换 */
+  --ok-bg:#0d2818;  --ok-bd:#1a7f37;  --ok-fg:#7ee787;
+  --warn-bg:#2a1f05;--warn-bd:#7a5c00;--warn-fg:#ffd479; --warn-fg-strong:#e3b341;
+  --dang-bg:#2d1210;--dang-bd:#8b2c26;--dang-fg:#ffb4ab;--dang-fg-strong:#ff7b72;
+
+  /* 遮罩层 */
+  --overlay:rgba(0,0,0,.72);
+}
+
+/* ============================================================
+   浅色主题：白底深色字，对比度按 WCAG AA 调过，不刺眼
+   ============================================================ */
+html[data-theme="light"]{
+  --bg:#f6f8fa; --panel:#ffffff; --panel2:#f0f3f6; --border:#d8dee4;
+  --text:#1f2328; --text2:#57606a; --text3:#818b98;
+  /* 浅色下文字要更深才够清晰 */
+  --green:#1a7f37; --amber:#9a6700; --red:#cf222e; --blue:#0969da; --gray:#6e7781;
+  --blue-hover:#0550ae;   /* 浅色下更深，才够对比度 */
+
+  --code-bg:#f6f8fa;
+  --text-code:#0969da;
+  --text-body:#3d444d;
+  --text-dash:#e4e8ed;
+  --sel-bg:#ddf4ff;
+  --sel-text:#0550ae;
+  --btn-primary:#0969da;
+  --btn-primary-hover:#0860ca;
+  --on-btn:#fff;
+
+  /* 浅色底 + 深色字，保证可读 */
+  --ok-bg:#dafbe1;  --ok-bd:#4ac26b;  --ok-fg:#116329;
+  --warn-bg:#fff8c5;--warn-bd:#d4a72c;--warn-fg:#7d4e00; --warn-fg-strong:#633d01;
+  --dang-bg:#ffebe9;--dang-bd:#ff8182;--dang-fg:#82071e;--dang-fg-strong:#a40e26;
+
+  --overlay:rgba(27,31,36,.55);
+
+  /* 圆角：两套主题一致，浅色下同样适用 */
+  --r:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  font-size:14px; line-height:1.65; padding:0 0 60px;
+}
+.wrap{max-width:940px;margin:0 auto;padding:0 20px}
+
+header{border-bottom:1px solid var(--border);padding:26px 0 20px;margin-bottom:22px}
+h1{font-size:20px;font-weight:600;letter-spacing:.3px}
+.sub{color:var(--text2);font-size:13px;margin-top:6px}
+
+/* ============================================================
+   功能2：主题切换按钮（放在页头右上角，不占用其它区域）
+   ============================================================ */
+.hd-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+/* 页头右侧按钮组（使用说明 + 主题切换） */
+.hd-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.theme-btn{
+  background:var(--panel);border:1px solid var(--border);color:var(--text2);
+  padding:7px 14px;border-radius:20px;cursor:pointer;font-family:inherit;
+  font-size:12.5px;transition:.15s;white-space:nowrap;flex-shrink:0;
+}
+.theme-btn:hover{border-color:var(--blue);color:var(--text)}
+/* 悬停时用半透明黑/白垫底，兼容两种主题 */
+.theme-btn:hover{background:var(--panel2)}
+
+/* 模式切换 */
+.modes{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.mbtn{
+  background:var(--panel);border:1px solid var(--border);color:var(--text2);
+  padding:7px 13px;border-radius:20px;font-size:12.5px;cursor:pointer;
+  font-family:inherit;transition:.15s;
+}
+.mbtn:hover{border-color:var(--blue);color:var(--text)}
+.mbtn.on{background:var(--sel-bg);border-color:var(--blue);color:var(--sel-text)}
+
+/* 输入区 */
+.chatbox{
+  background:var(--panel);border:1px solid var(--border);border-radius:var(--r);
+  padding:14px;margin-bottom:16px;
+}
+.chatbox textarea{
+  width:100%;min-height:74px;background:transparent;border:none;outline:none;
+  color:var(--text);font-family:inherit;font-size:14px;resize:vertical;line-height:1.6;
+}
+.chatbox textarea::placeholder{color:var(--text3)}
+.chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px;padding-top:11px;border-top:1px solid var(--border)}
+.chip{
+  background:var(--panel2);border:1px solid var(--border);color:var(--text2);
+  padding:5px 11px;border-radius:14px;font-size:12px;cursor:pointer;font-family:inherit;
+}
+.chip:hover{border-color:var(--blue);color:var(--sel-text);background:var(--sel-bg)}
+.sendbar{display:flex;justify-content:space-between;align-items:center;margin-top:11px;gap:10px;flex-wrap:wrap}
+/* 左侧提示文字：允许收缩换行，避免把右侧按钮挤出屏幕 */
+.hint{color:var(--text3);font-size:11.5px;flex:1;min-width:120px}
+.sendbtn{
+  background:var(--btn-primary);border:none;color:var(--on-btn);padding:8px 22px;border-radius:6px;
+  font-size:13.5px;cursor:pointer;font-family:inherit;font-weight:500;
+}
+.sendbtn:hover{background:var(--btn-primary-hover)}
+
+/* ============================================================
+   功能3：批量检测按钮（与发送按钮并排，样式保持一致）
+   ============================================================ */
+.batchbtn{
+  background:var(--panel2);border:1px solid var(--border);color:var(--text2);
+  padding:8px 18px;border-radius:6px;font-size:13.5px;cursor:pointer;
+  font-family:inherit;font-weight:500;transition:.15s;
+}
+.batchbtn:hover:not(:disabled){border-color:var(--blue);color:var(--sel-text);background:var(--sel-bg)}
+.batchbtn:disabled{opacity:.55;cursor:not-allowed}
+/* 加载中的呼吸动画 */
+.batchbtn.loading{border-color:var(--blue);color:var(--sel-text);background:var(--sel-bg)}
+
+/* ============================================================
+   功能4：导出 TXT 报告
+   - .expbtn  导出按钮（复用 .batchbtn 的视觉规范，配色全走 CSS 变量）
+   - .expmenu 导出范围选择菜单（本次批量 / 全部历史）
+   ============================================================ */
+.expbtn{
+  background:var(--panel2);border:1px solid var(--border);color:var(--text2);
+  padding:8px 18px;border-radius:6px;font-size:13.5px;cursor:pointer;
+  font-family:inherit;font-weight:500;transition:.15s;
+}
+.expbtn:hover:not(:disabled){border-color:var(--blue);color:var(--sel-text);background:var(--sel-bg)}
+.expbtn:disabled{opacity:.55;cursor:not-allowed}
+/* 正在导出时的状态，和批量检测的 loading 观感保持一致 */
+.expbtn.loading{border-color:var(--blue);color:var(--sel-text);background:var(--sel-bg)}
+
+/* 导出按钮 + 菜单的相对定位容器 */
+.expwrap{position:relative;display:inline-flex}
+
+/* 导出范围选择菜单 */
+.expmenu{
+  position:absolute;bottom:calc(100% + 8px);right:0;z-index:60;
+  background:var(--panel);border:1px solid var(--border);border-radius:8px;
+  box-shadow:0 8px 24px rgba(0,0,0,.35);
+  padding:6px;min-width:212px;display:none;
+}
+.expmenu.on{display:block}
+.expmenu button{
+  display:block;width:100%;text-align:left;background:none;border:none;
+  color:var(--text-body);font-family:inherit;font-size:13px;
+  padding:9px 11px;border-radius:6px;cursor:pointer;transition:.15s;line-height:1.5;
+}
+.expmenu button:hover{background:var(--sel-bg);color:var(--sel-text)}
+.expmenu .mtitle{
+  font-size:11.5px;color:var(--text3);padding:4px 11px 7px;border-bottom:1px solid var(--border);
+  margin-bottom:5px;
+}
+.expmenu .mcnt{display:block;font-size:11.5px;color:var(--text3);margin-top:2px}
+.expmenu button:disabled{opacity:.5;cursor:not-allowed}
+.expmenu button:disabled:hover{background:none;color:var(--text-body)}
+
+/* 导出过程中的浮层提示（比 alert 轻，不打断操作） */
+.exptip{
+  position:fixed;left:50%;bottom:34px;transform:translateX(-50%);
+  background:var(--panel);border:1px solid var(--border);border-radius:8px;
+  color:var(--text);padding:11px 20px;font-size:13.5px;z-index:120;
+  box-shadow:0 8px 24px rgba(0,0,0,.35);display:none;
+  max-width:80vw;text-align:center;line-height:1.6;
+}
+.exptip.on{display:block}
+.exptip.ok{border-color:var(--ok-bd);background:var(--ok-bg);color:var(--ok-fg)}
+.exptip.warn{border-color:var(--warn-bd);background:var(--warn-bg);color:var(--warn-fg)}
+.exptip.err{border-color:var(--dang-bd);background:var(--dang-bg);color:var(--dang-fg)}
+
+/* ============================================================
+   功能5：AI 风险解读
+   - .aibtn   触发按钮（与 .hact 同尺寸风格，小巧不抢行内空间）
+   - .aimodal 解读弹窗（复用 --overlay 遮罩）
+   - 弹窗内文字用 --text-body，比 --text2 更亮，保证 WCAG 对比度
+   ============================================================ */
+.aibtn{
+  background:var(--panel2);border:1px solid var(--border);color:var(--text2);
+  padding:3px 10px;border-radius:5px;cursor:pointer;font-family:inherit;
+  font-size:11.5px;line-height:1.6;transition:.15s;white-space:nowrap;
+}
+.aibtn:hover:not(:disabled){border-color:var(--blue);color:var(--sel-text);background:var(--sel-bg)}
+.aibtn:disabled{opacity:.55;cursor:not-allowed}
+/* 请求中：转圈图标 + 禁用，防重复发起 */
+.aibtn.loading{border-color:var(--blue);color:var(--sel-text);background:var(--sel-bg)}
+
+/* 解读弹窗：比现有 .modal 宽，因为解读内容较长 */
+.aimodal .mbox{max-width:640px}
+/* 弹窗头部：标题 + 关闭按钮同一行 */
+.ai-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px}
+.ai-hd h3{font-size:16.5px;color:var(--amber);margin:0;line-height:1.5}
+/* 关闭按钮复用 .mclose 风格，缩到小号 */
+.ai-x{
+  background:var(--panel2);border:1px solid var(--border);color:var(--text2);
+  width:28px;height:28px;border-radius:6px;cursor:pointer;flex:none;
+  font-size:16px;line-height:1;font-family:inherit;display:flex;
+  align-items:center;justify-content:center;transition:.15s;padding:0;
+}
+.ai-x:hover{border-color:var(--red);color:var(--red)}
+
+/* 被解读链接 + 结论的摘要条 */
+.ai-sum{
+  background:var(--code-bg);border:1px solid var(--border);border-radius:8px;
+  padding:11px 14px;margin-bottom:16px;font-size:12.5px;line-height:1.8;
+}
+.ai-sum .u{
+  color:var(--text-code);word-break:break-all;display:block;margin-bottom:5px;font-size:12.5px;
+}
+.ai-sum .m{color:var(--text3);font-size:11.5px}
+
+/* 四段解读内容：可内部滚动，不撑破弹窗 */
+.ai-body{
+  max-height:min(52vh,460px);overflow-y:auto;padding-right:8px;
+  /* 自定义滚动条，跟随主题 */
+  scrollbar-width:thin;
+  scrollbar-color:var(--border) transparent;
+}
+.ai-body::-webkit-scrollbar{width:8px}
+.ai-body::-webkit-scrollbar-track{background:transparent}
+.ai-body::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+.ai-body::-webkit-scrollbar-thumb:hover{background:var(--text3)}
+
+/* 单段 */
+.ai-sec{margin-bottom:18px}
+.ai-sec:last-child{margin-bottom:4px}
+.ai-sec .t{
+  font-size:13px;color:var(--text);font-weight:600;margin-bottom:7px;
+  display:flex;align-items:center;gap:6px;
+}
+/* 段落标题左侧竖条，用状态色区分 */
+.ai-sec .t::before{
+  content:'';width:3px;height:13px;border-radius:2px;
+  background:var(--blue);flex:none;
+}
+.ai-sec.s-risk .t::before{background:var(--red)}
+.ai-sec.s-method .t::before{background:var(--amber)}
+.ai-sec.s-harm .t::before{background:var(--dang-fg-strong)}
+.ai-sec.s-protect .t::before{background:var(--green)}
+
+/* 正文：保留换行（AI 返回的文本里有 \n），行高放宽提升可读性 */
+.ai-sec .c{
+  color:var(--text-body);font-size:13.5px;line-height:1.9;
+  white-space:pre-wrap;word-break:break-word;margin:0;
+}
+
+/* 加载态 */
+.ai-load{
+  display:flex;align-items:center;gap:10px;justify-content:center;
+  padding:36px 20px;color:var(--text2);font-size:13.5px;
+}
+.ai-load .bt-spin{width:16px;height:16px;border-width:2px}
+
+/* 错误态 */
+.ai-err{
+  background:var(--dang-bg);border:1px solid var(--dang-bd);border-radius:8px;
+  padding:14px 16px;color:var(--dang-fg);font-size:13px;line-height:1.8;
+}
+.ai-err .wt{display:block;font-weight:600;margin-bottom:5px;color:var(--dang-fg-strong)}
+
+/* 数据来源标注 */
+.ai-foot{
+  font-size:11.5px;color:var(--text3);margin-top:14px;padding-top:12px;
+  border-top:1px solid var(--border);line-height:1.7;
+}
+
+/* 输出 */
+#out{margin-top:20px}
+.answer{
+  background:var(--panel);border:1px solid var(--border);border-radius:var(--r);
+  padding:18px 20px;margin-bottom:14px;animation:fade .25s ease;
+}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.answer h3{font-size:15.5px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.answer p{margin-bottom:9px;color:var(--text-body)}
+.hr{height:1px;background:var(--border);margin:14px 0}
+
+/* 标签 */
+.tag{
+  display:inline-block;padding:4px 13px;border-radius:16px;font-size:13px;font-weight:600;
+  border:1px solid;cursor:pointer;
+}
+.tag.safe{color:var(--ok-fg);border-color:var(--ok-bd);background:var(--ok-bg)}
+.tag.suspicious{color:var(--warn-fg);border-color:var(--warn-bd);background:var(--warn-bg)}
+.tag.danger{color:var(--dang-fg);border-color:var(--dang-bd);background:var(--dang-bg)}
+.tag.unknown{color:var(--gray);border-color:var(--border);background:var(--panel2)}
+.tag:hover{filter:brightness(1.25)}
+
+/* 警告块 */
+.warn{border-radius:8px;padding:12px 15px;margin:13px 0;font-size:13.5px;border-left:4px solid}
+.warn .wt{font-weight:600;margin-bottom:5px;display:block}
+.warn-caution{background:var(--dang-bg);border-color:var(--dang-bd);color:var(--dang-fg)}
+.warn-caution .wt{color:var(--dang-fg-strong)}
+.warn-warning{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-fg)}
+.warn-warning .wt{color:var(--warn-fg-strong)}
+.warn-info{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-fg)}
+.warn-info .wt{color:var(--green)}
+.warn-neutral{background:var(--panel2);border-color:var(--border);color:var(--text2)}
+.warn-neutral .wt{color:var(--text)}
+
+/* 信息网格 */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px;margin:12px 0}
+.cell{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px 13px}
+.cell .k{color:var(--text3);font-size:11.5px;margin-bottom:3px}
+.cell .v{color:var(--text);font-size:13.5px;word-break:break-all}
+
+/* 跳转链 */
+.chain{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin:11px 0}
+.chain .step{
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;color:var(--text-code);
+  padding:4px 0;border-bottom:1px dashed var(--text-dash);
+}
+.chain .step:last-child{border-bottom:none}
+.chain .step.fin{color:var(--ok-fg);font-weight:500}
+
+/* ============================================================
+   可点击跳转的网址
+   ------------------------------------------------------------
+   统一规则：网址文字点击 → 新标签页打开；复制走独立按钮。
+   颜色一律走 CSS 变量，深浅主题各自适配，不写死颜色值。
+   ============================================================ */
+.url-link{
+  color:var(--blue);
+  cursor:pointer;
+  text-decoration:none;
+  border-bottom:1px solid transparent;
+  transition:color .15s,border-color .15s;
+  word-break:break-all;
+}
+/* hover 才显示下划线：默认态保持安静，hover 时明确"这是个能点的链接" */
+.url-link:hover{
+  color:var(--blue-hover);
+  border-bottom-color:currentColor;
+  text-decoration:none;
+}
+.url-link:active{color:var(--blue);opacity:.75}
+/* 键盘聚焦时也要有清晰可见的焦点圈（无障碍） */
+.url-link:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:3px}
+/* 不可跳转的网址（如高危站）：纯文字，不给手型光标 */
+.url-text{cursor:default;word-break:break-all}
+
+/* 站点用途识别板块：一句话说明，与报告卡片风格统一 */
+.purpose{
+  background:var(--panel2);
+  border:1px solid var(--border);
+  border-left:3px solid var(--blue);
+  border-radius:0 8px 8px 0;
+  padding:10px 14px;
+  font-size:13.5px;
+  line-height:1.7;
+  color:var(--text-body);
+  margin:4px 0 2px;
+}
+
+/* 风险清单 */
+.risks{list-style:none;margin:11px 0}
+.risks li{
+  background:var(--panel2);border-left:3px solid var(--amber);border-radius:0 6px 6px 0;
+  padding:8px 13px;margin-bottom:7px;font-size:13.5px;color:var(--text-body);
+}
+.risks.clean{border-left-color:var(--green)}
+.risks.clean li{border-left-color:var(--green);color:var(--ok-fg)}
+
+/* 操作按钮 */
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}
+.abtn{
+  background:var(--panel2);border:1px solid var(--border);color:var(--text2);
+  padding:7px 14px;border-radius:6px;font-size:12.5px;cursor:pointer;font-family:inherit;transition:.15s;
+}
+.abtn:hover{border-color:var(--blue);color:var(--sel-text);background:var(--sel-bg)}
+
+/* 推荐卡片 */
+.site{
+  background:var(--panel2);border:1px solid var(--border);border-radius:var(--r);
+  padding:15px 17px;margin-bottom:11px;transition:.15s;
+}
+.site:hover{border-color:var(--blue)}
+.site .st{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:7px}
+.site .sn{font-size:14.5px;font-weight:600}
+.site .su{font-family:ui-monospace,monospace;font-size:12px;color:var(--text-code);word-break:break-all;margin-bottom:8px}
+.site .sd{font-size:13px;color:var(--text2);line-height:1.6}
+.stags{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.mini{font-size:11px;padding:2.5px 9px;border-radius:11px;border:1px solid var(--border);color:var(--text3)}
+.mini.g{color:var(--ok-fg);border-color:var(--ok-bd);background:var(--ok-bg)}
+.mini.y{color:var(--warn-fg);border-color:var(--warn-bd);background:var(--warn-bg)}
+
+/* 免责声明 */
+.disc{
+  background:var(--code-bg);border:1px solid var(--border);border-radius:8px;
+  padding:11px 14px;margin-top:13px;font-size:11.5px;color:var(--text3);line-height:1.7;
+}
+
+/* 科普弹窗 */
+.modal{
+  position:fixed;inset:0;background:var(--overlay);display:none;
+  align-items:center;justify-content:center;z-index:100;padding:20px;
+}
+.modal.on{display:flex}
+.mbox{
+  background:var(--panel);border:1px solid var(--border);border-radius:14px;
+  max-width:560px;width:100%;max-height:80vh;overflow-y:auto;padding:24px 26px;
+}
+.mbox h3{font-size:16.5px;margin-bottom:12px;color:var(--amber)}
+.mbox p{color:var(--text-body);font-size:14px;margin-bottom:14px;line-height:1.8}
+.mclose{
+  background:var(--panel2);border:1px solid var(--border);color:var(--text2);
+  padding:7px 18px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:13px;
+}
+.mclose:hover{border-color:var(--red);color:var(--text)}
+
+/* 工具简介弹窗：三段功能说明，深浅主题自适应 */
+.about-sec{margin-bottom:16px}
+.about-t{font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px}
+.about-p{font-size:13.5px;color:var(--text-body);line-height:1.75;margin:0}
+.about-tip{
+  font-size:12px;color:var(--text3);background:var(--code-bg);
+  border:1px solid var(--border);border-radius:8px;padding:10px 13px;
+  margin:4px 0 16px;line-height:1.7;
+}
+
+.steps{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:12px 15px;margin:11px 0}
+.steps .s{font-size:12.5px;color:var(--text-code);padding:3px 0;font-family:ui-monospace,monospace}
+.steps .h{font-size:12px;color:var(--text3);margin-bottom:6px}
+ul.plain{margin:8px 0 8px 20px;color:var(--text-body);font-size:13.5px}
+ul.plain li{margin-bottom:5px}
+.empty{color:var(--text3);text-align:center;padding:40px 20px;font-size:13.5px}
+
+/* ============================================================
+   功能1：历史记录面板
+   ============================================================ */
+.hist{
+  background:var(--panel);border:1px solid var(--border);border-radius:var(--r);
+  padding:14px 16px;margin-bottom:18px;
+}
+.hist-hd{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.hist-hd .ttl{font-size:14px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px}
+.hist-hd .cnt{color:var(--text3);font-size:12px;font-weight:400}
+.hbtn{
+  background:var(--panel2);border:1px solid var(--border);color:var(--text2);
+  padding:5px 12px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;transition:.15s;
+}
+.hbtn:hover{border-color:var(--blue);color:var(--text)}
+.hbtn.danger:hover{border-color:var(--red);color:var(--red)}
+.hbtn:disabled{opacity:.5;cursor:not-allowed}
+
+/* 历史表格 */
+.htable{width:100%;border-collapse:collapse;font-size:13px}
+.htable th{
+  text-align:left;padding:8px 10px;color:var(--text3);font-weight:500;font-size:12px;
+  border-bottom:1px solid var(--border);white-space:nowrap;
+}
+.htable td{padding:9px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+.htable tr:last-child td{border-bottom:none}
+.htable tr:hover td{background:var(--panel2)}
+.htable .u{
+  font-family:ui-monospace,monospace;font-size:12px;color:var(--blue);
+  word-break:break-all;max-width:320px;display:block;line-height:1.45;
+}
+.htable .tm{color:var(--text3);font-size:12px;white-space:nowrap;font-family:ui-monospace,monospace}
+
+/* 风险等级小标签 */
+.lv{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11.5px;font-weight:500;white-space:nowrap}
+.lv.safe{background:var(--ok-bg);color:var(--ok-fg);border:1px solid var(--ok-bd)}
+.lv.suspicious{background:var(--warn-bg);color:var(--warn-fg);border:1px solid var(--warn-bd)}
+.lv.danger{background:var(--dang-bg);color:var(--dang-fg);border:1px solid var(--dang-bd)}
+.lv.unknown{background:var(--panel2);color:var(--gray);border:1px solid var(--border)}
+
+/* ============================================================
+   功能6：检测结果标签筛选
+   - .fbar   筛选栏容器（flex 换行，窄屏不会撑破页面）
+   - .ftag   标签按钮，配色沿用 .lv 四档状态色，全站一致
+   - .ftag.on 选中态：实心底 + 深色字，保证对比度
+   - .ftag.off 该区域不可用（历史区的特征类标签）：置灰 + 禁用光标
+   - .ftag .n  命中条数
+   ============================================================ */
+.fbar{
+  display:flex;align-items:center;gap:7px;flex-wrap:wrap;
+  padding:10px 0 2px;margin-bottom:4px;
+}
+/* 栏目标题，窄屏时可换行 */
+.fbar .lb{
+  font-size:12px;color:var(--text3);margin-right:2px;white-space:nowrap;
+  display:inline-flex;align-items:center;gap:5px;
+}
+.ftag{
+  background:var(--panel2);border:1px solid var(--border);color:var(--text2);
+  padding:4px 11px;border-radius:20px;cursor:pointer;font-family:inherit;
+  font-size:12px;line-height:1.6;transition:.15s;white-space:nowrap;
+  display:inline-flex;align-items:center;gap:5px;
+}
+.ftag:hover:not(.off):not(.on){border-color:var(--blue);color:var(--sel-text);background:var(--sel-bg)}
+/* 命中条数：小字弱化，不抢标签本身 */
+.ftag .n{font-size:10.5px;opacity:.72;font-variant-numeric:tabular-nums}
+
+/* ---------- 选中态：按标签色板给实心底 ---------- */
+/* 未选中时只给左侧色点，选中后整块变实心 —— 视觉区分明显 */
+.ftag::before{
+  content:'';width:7px;height:7px;border-radius:50%;
+  background:var(--gray);flex:none;transition:.15s;
+}
+.ftag.c-danger::before{background:var(--red)}
+.ftag.c-suspicious::before{background:var(--amber)}
+.ftag.c-safe::before{background:var(--green)}
+.ftag.c-unknown::before{background:var(--gray)}
+
+/* 选中态：沿用全站 .lv / .tag 的配色套路 —— 浅色底 + 深色字。
+   不要用「实心状态色 + 白字」：状态色在深色主题下本身是亮色（如 #ff7b72），
+   白字压上去只有 2.5:1 对比度，远达不到 WCAG AA。
+   这里用 --xx-bg 做底、--xx-fg 做字，两套主题都保证 ≥4.5:1。 */
+.ftag.on{font-weight:600}
+.ftag.on.c-danger{background:var(--dang-bg);color:var(--dang-fg);border-color:var(--dang-bd)}
+.ftag.on.c-suspicious{background:var(--warn-bg);color:var(--warn-fg);border-color:var(--warn-bd)}
+.ftag.on.c-safe{background:var(--ok-bg);color:var(--ok-fg);border-color:var(--ok-bd)}
+/* 未知档没有专属的成套色，用中性色；
+   文字取 --text2（两套主题都 ≥4.5:1），不用偏暗的 --gray，避免对比度不足。 */
+.ftag.on.c-unknown{background:var(--panel2);color:var(--text2);border-color:var(--text3)}
+/* 选中后色点跟随文字色，保持"浅底块里的小圆点"层次 */
+.ftag.on::before{background:currentColor;opacity:.9}
+
+/* ---------- 不可用态（历史区的特征类标签）---------- */
+.ftag.off{
+  opacity:.42;cursor:not-allowed;
+  border-style:dashed;
+}
+.ftag.off::before{background:var(--border)}
+.ftag.off:hover{border-color:var(--border);color:var(--text2);background:var(--panel2)}
+
+/* 清空筛选按钮 */
+.ftag.clear{
+  background:none;border:1px dashed var(--border);color:var(--text3);
+}
+.ftag.clear:hover:not(:disabled){border-color:var(--blue);color:var(--sel-text);background:var(--sel-bg)}
+.ftag.clear::before{display:none}
+.ftag.clear:disabled{opacity:.35;cursor:not-allowed}
+
+/* 筛选结果计数提示 */
+.fbar .rs{font-size:11.5px;color:var(--text3);margin-left:auto;white-space:nowrap}
+/* 有筛选生效时用主色提示「正在筛选」 */
+.fbar .rs.on{color:var(--sel-text)}
+
+/* 历史行内小按钮 */
+.hact{
+  background:none;border:1px solid var(--border);color:var(--text2);
+  padding:3px 9px;border-radius:5px;cursor:pointer;font-family:inherit;font-size:11.5px;
+  margin-right:5px;transition:.15s;white-space:nowrap;
+}
+.hact:hover{border-color:var(--blue);color:var(--blue)}
+.hact.del:hover{border-color:var(--red);color:var(--red)}
+
+.hist-empty{color:var(--text3);font-size:13px;text-align:center;padding:22px 0}
+.hist-pager{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:12px;font-size:12px;color:var(--text3)}
+
+/* ============================================================
+   功能3：批量检测结果表格
+   样式沿用 .htable 的变量体系，自动兼容深/浅两套主题
+   ============================================================ */
+/* 表格里的网址可点击，复填后触发单条检测 */
+.bt-url{
+  font-family:ui-monospace,monospace;font-size:12px;color:var(--text-code);
+  word-break:break-all;max-width:460px;display:block;line-height:1.45;
+  cursor:pointer;border:none;background:none;padding:0;text-align:left;font-family:inherit;
+}
+.bt-url:hover{color:var(--sel-text);text-decoration:underline}
+/* 行内补充说明（仅 unknown 时出现，用中性灰不惊悚） */
+.bt-note{color:var(--text3);font-size:11.5px;display:block;margin-top:3px;line-height:1.5}
+.bt-jump{color:var(--text3);font-size:12px;white-space:nowrap}
+
+/* 加载提示条 */
+.bt-loading{
+  display:flex;align-items:center;gap:10px;color:var(--text2);font-size:13px;
+  padding:14px 16px;
+}
+.bt-spin{
+  width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--blue);
+  border-radius:50%;animation:btspin .7s linear infinite;flex-shrink:0;
+}
+@keyframes btspin{to{transform:rotate(360deg)}}
+/* 批次进度文字 */
+.bt-prog{color:var(--text3);font-size:11.5px;margin-top:8px}
+/* 表格容器：窄屏可横向滚动，避免撑破页面 */
+.htable-wrap{overflow-x:auto}
+.htable-wrap .htable{min-width:100%}
+
+/* ============================================================
+   功能7：快捷复制 + 二维码预览
+   - .row-actions  行内操作按钮组（复制 / 二维码 / AI解读 并排）
+   - .qrmodal      二维码预览弹窗（复用 .modal 的 --overlay 遮罩）
+   - 二维码画布始终白底黑块（QR 扫描要求），不随主题变化；
+     弹窗的文字/边框/提示则全部走 CSS 变量，两套主题自动适配
+   ============================================================ */
+/* 行内操作按钮组：并排、不换行、留 5px 间距，互不遮挡 */
+.row-actions{display:flex;align-items:center;gap:5px;flex-wrap:nowrap;white-space:nowrap}
+/* 历史行的 .hact 自带 margin-right，在 flex 里会和 gap 叠加，这里重置掉 */
+.row-actions .hact{margin-right:0}
+/* 二维码弹窗：比 AI 解读弹窗窄，居中放一个二维码即可 */
+.qrmodal .mbox{max-width:400px}
+.qr-body{display:flex;flex-direction:column;align-items:center;gap:13px;padding-top:2px}
+/* 画布按 JS 算出的实际像素显示，max-width 兜底不撑破弹窗 */
+.qr-body canvas{max-width:100%;height:auto;background:#fff;border:1px solid var(--border);border-radius:8px;display:block}
+/* 提示文字与链接展示（自适应主题） */
+.qr-hint{color:var(--text2);font-size:13px}
+.qr-url{color:var(--text3);font-size:12px;word-break:break-all;text-align:center;max-width:100%;line-height:1.6}
+
+/* ============================================================
+   功能8：风险统计看板
+   - .dash        看板容器（一行紧凑卡片组，不占大量空间）
+   - .dcard       统计卡片（可点击联动筛选标签）
+   - 配色与 .lv 风险徽章一致：安全绿 / 可疑黄 / 高危红 / 未知灰
+   - 全部走 CSS 变量，深色/浅色主题自动适配
+   ============================================================ */
+.dash{
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  background:var(--panel);border:1px solid var(--border);border-radius:var(--r);
+  padding:11px 16px;margin-bottom:18px;
+}
+.dash-src{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.ds-label{font-size:13px;font-weight:600;color:var(--text);white-space:nowrap}
+.ds-btn{
+  background:var(--panel2);border:1px solid var(--border);color:var(--text2);
+  padding:4px 11px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;
+  transition:.15s;white-space:nowrap;
+}
+.ds-btn:hover{border-color:var(--blue);color:var(--sel-text);background:var(--sel-bg)}
+.ds-btn.on{border-color:var(--blue);color:var(--sel-text);background:var(--sel-bg);font-weight:500}
+.dash-cards{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap;flex:1;min-width:0}
+.dcard{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  background:var(--panel2);border:1px solid var(--border);border-radius:8px;
+  padding:7px 15px;cursor:pointer;font-family:inherit;transition:.15s;min-width:62px;
+}
+.dcard:hover{transform:translateY(-1px);box-shadow:0 2px 10px rgba(0,0,0,.18)}
+.dcard .dc-label{font-size:11px;color:var(--text3);white-space:nowrap;line-height:1.4}
+.dcard .dc-num{font-size:20px;font-weight:700;line-height:1.2;color:var(--text);font-variant-numeric:tabular-nums}
+.dcard.empty .dc-num{color:var(--text3)}
+/* 风险等级配色（数字颜色，与 .lv 徽章同一套变量） */
+.dcard.c-safe{border-color:var(--ok-bd)}
+.dcard.c-safe .dc-num{color:var(--ok-fg)}
+.dcard.c-suspicious{border-color:var(--warn-bd)}
+.dcard.c-suspicious .dc-num{color:var(--warn-fg)}
+.dcard.c-danger{border-color:var(--dang-bd)}
+.dcard.c-danger .dc-num{color:var(--dang-fg)}
+.dcard.c-unknown .dc-num{color:var(--gray)}
+/* 选中态：对应筛选标签被选中时高亮（与 .ftag.on 一致） */
+.dcard.on{background:var(--sel-bg);border-color:var(--blue)}
+.dcard.on .dc-num,.dcard.on .dc-label{color:var(--sel-text)}
+
+/* ============================================================
+   功能9：本地收藏 + 功能10：自定义模板
+   - .dtabs     数据面板切换标签（历史 / 收藏）
+   - .fav-btn   星标按钮（☆ 空心 / ★ 填充高亮）
+   - .tplmodal  模板管理弹窗（复用 .modal overlay）
+   ============================================================ */
+/* 数据面板切换标签 */
+.dtabs{display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.dtab{
+  background:var(--panel2);border:1px solid var(--border);color:var(--text2);
+  padding:5px 14px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:13px;
+  transition:.15s;white-space:nowrap;
+}
+.dtab:hover{border-color:var(--blue);color:var(--sel-text);background:var(--sel-bg)}
+.dtab.on{border-color:var(--blue);color:var(--sel-text);background:var(--sel-bg);font-weight:500}
+.dtab .fav-n{font-size:11px;color:var(--amber);margin-left:2px}
+
+/* 星标收藏按钮：小巧、无边框底色，空心 ☆ / 填充 ★ */
+.fav-btn{
+  background:none;border:none;cursor:pointer;font-family:inherit;
+  font-size:16px;line-height:1;padding:2px 4px;color:var(--text3);
+  transition:.15s;border-radius:4px;vertical-align:middle;
+}
+.fav-btn:hover{color:var(--amber);transform:scale(1.15)}
+.fav-btn.on{color:var(--amber)}
+
+/* 模板管理弹窗 */
+.tplmodal .mbox{max-width:520px}
+.tpl-list{display:flex;flex-direction:column;gap:8px;max-height:46vh;overflow-y:auto;margin:12px 0}
+.tpl-item{
+  display:flex;align-items:center;gap:10px;padding:9px 12px;
+  background:var(--panel2);border:1px solid var(--border);border-radius:8px;
+}
+.tpl-item .tpl-meta{flex:1;min-width:0}
+.tpl-item .tpl-name{font-size:13px;color:var(--text);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tpl-item .tpl-url{font-size:11.5px;color:var(--text3);font-family:ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tpl-item .tpl-lock{font-size:11px;color:var(--text3);flex-shrink:0}
+.tpl-chk{width:16px;height:16px;flex-shrink:0;accent-color:var(--blue);cursor:pointer}
+/* 模板 chips 里的「管理模板」按钮与自定义模板标记 */
+.chip.chip-manage{border-style:dashed;color:var(--text3)}
+.chip.chip-manage:hover{border-color:var(--blue);color:var(--sel-text);background:var(--sel-bg)}
+.chip.chip-custom{border-style:solid}
+.tpl-form{display:flex;flex-direction:column;gap:10px;margin-bottom:6px}
+.tpl-form .fld{display:flex;flex-direction:column;gap:4px}
+.tpl-form label{font-size:12px;color:var(--text3)}
+.tpl-form input{
+  background:var(--panel2);border:1px solid var(--border);color:var(--text);
+  border-radius:6px;padding:8px 10px;font-family:inherit;font-size:13px;outline:none;
+  transition:.15s;
+}
+.tpl-form input:focus{border-color:var(--blue)}
+.tpl-form input::placeholder{color:var(--text3)}
+.tpl-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:6px;flex-wrap:wrap}
+.tpl-hint{font-size:12px;color:var(--text3);margin-top:8px;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="hd-row">
+      <div>
+        <h1>网址慧眼</h1>
+        <div class="sub">双向智能安全助手 · 通道A 链接风险检测 ｜ 通道B 需求推荐站点</div>
+      </div>
+      <div class="hd-actions">
+        <button class="theme-btn" onclick="openAboutModal()">📖 使用说明</button>
+        <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">🌙 浅色模式</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="modes" id="modes">
+    <button class="mbtn on" data-m="normal">正常模式</button>
+    <button class="mbtn" data-m="L1">降级L1 · 威胁库不可用</button>
+    <button class="mbtn" data-m="L2">降级L2 · 页面抓取失败</button>
+    <button class="mbtn" data-m="L3">降级L3 · 推荐服务维护</button>
+    <button class="mbtn" data-m="L4">降级L4 · 短链解析失效</button>
+  </div>
+
+  <!-- ========== 功能8：风险统计看板 ========== -->
+  <div class="dash" id="dash">
+    <div class="dash-src">
+      <span class="ds-label">📊 统计</span>
+      <button class="ds-btn on" id="dashSrcBatch" onclick="setDashSource('batch')">批量结果</button>
+      <button class="ds-btn" id="dashSrcHist" onclick="setDashSource('history')">历史记录</button>
+    </div>
+    <div class="dash-cards" id="dashCards"></div>
+  </div>
+
+  <!-- ========== 功能1 + 功能9：数据面板（历史记录 / 收藏夹 切换） ========== -->
+  <!-- 功能9：在历史面板上加切换标签，收藏夹与历史记录并列，共用下方筛选栏与列表区 -->
+  <div class="dtabs" id="dtabs">
+    <button class="dtab on" id="tabHistory" onclick="switchDataTab('history')">📋 历史记录</button>
+    <button class="dtab" id="tabFav" onclick="switchDataTab('favorites')">⭐ 收藏夹 <span class="fav-n" id="favCnt">0</span></button>
+  </div>
+
+  <!-- ========== 功能1：历史记录面板 ========== -->
+  <div class="hist" id="panelHistory">
+    <div class="hist-hd">
+      <div class="ttl">📋 历史记录 <span class="cnt" id="histCnt"></span></div>
+      <div>
+        <button class="hbtn" id="histRefresh">刷新</button>
+        <button class="expbtn" id="expBtn" style="padding:5px 12px;font-size:12px" onclick="toggleExportMenu(event)">⬇ 导出报告</button>
+        <button class="hbtn danger" id="histClear">一键清空</button>
+        <!-- 功能4：导出范围选择菜单（本次批量 / 全部历史） -->
+        <div class="expmenu" id="expMenu">
+          <div class="mtitle">选择导出范围</div>
+          <button id="expBatch" onclick="doExport('batch')">
+            本次批量检测结果
+            <span class="mcnt" id="expBatchCnt">暂无批量结果</span>
+          </button>
+          <button id="expHistory" onclick="doExport('history')">
+            全部历史记录
+            <span class="mcnt" id="expHistoryCnt">暂无历史记录</span>
+          </button>
+          <!-- 功能6：按当前筛选条件导出 -->
+          <button id="expFiltered" onclick="doExport('filtered')">
+            当前筛选结果
+            <span class="mcnt" id="expFilteredCnt">未启用筛选</span>
+          </button>
+          <!-- 功能9：导出收藏夹 -->
+          <button id="expFav" onclick="doExport('favorites')">
+            收藏夹
+            <span class="mcnt" id="expFavCnt">暂无收藏</span>
+          </button>
+        </div>
+      </div>
+    </div>
+    <!-- 功能6：历史记录筛选栏（与批量区共用同一套标签体系） -->
+    <div class="fbar" id="histFilterBar"></div>
+    <div id="histBody">
+      <div class="hist-empty">加载中…</div>
+    </div>
+    <div class="hist-pager" id="histPager" style="display:none">
+      <button class="hbtn" id="histPrev">上一页</button>
+      <span id="histPageInfo"></span>
+      <button class="hbtn" id="histNext">下一页</button>
+    </div>
+  </div>
+
+  <!-- ========== 功能9：收藏夹面板 ========== -->
+  <div class="hist" id="panelFavorites" style="display:none">
+    <div class="hist-hd">
+      <div class="ttl">⭐ 我的收藏 <span class="cnt" id="favTotal"></span></div>
+      <div>
+        <button class="expbtn" id="favExpBtn" style="padding:5px 12px;font-size:12px" onclick="doExport('favorites')">⬇ 导出收藏</button>
+        <button class="hbtn danger" id="favClear" onclick="clearFavorites()">清空收藏</button>
+      </div>
+    </div>
+    <!-- 复用功能6 的筛选栏容器位置（同一套标签体系） -->
+    <div class="fbar" id="favFilterBar"></div>
+    <div id="favBody">
+      <div class="hist-empty">还没有收藏任何网址<br><span style="font-size:12px">在批量结果或历史记录里点 ☆ 即可收藏</span></div>
+    </div>
+  </div>
+
+  <div class="chatbox">
+    <textarea id="ta" placeholder="输入网址进行风险检测，或描述你的需求查找靠谱网站…（批量检测：一行一个网址）"></textarea>
+    <div class="chips" id="chips">
+      <!-- 功能10：模板由 renderTemplates() 渲染（内置样例 + 自定义模板 + 管理按钮） -->
+    </div>
+    <div class="sendbar">
+      <span class="hint">Enter 发送 · Shift+Enter 换行　|　批量检测：一行一个网址</span>
+      <button class="batchbtn" id="addSiteBtn" onclick="openAddSiteModal()">➕ 添加站点</button>
+      <button class="batchbtn" id="batchBtn" onclick="batchDetect()">📋 批量检测</button>
+      <button class="sendbtn" id="send">发送</button>
+    </div>
+  </div>
+
+  <div id="out">
+    <div class="empty">↑ 输入网址进行风险检测，或描述你的需求查找靠谱网站<br><span style="font-size:12px">或点击上方快捷标签查看典型场景</span></div>
+  </div>
+</div>
+
+<div class="exptip" id="expTip"></div>
+
+<div class="modal aimodal" id="aiModal">
+  <div class="mbox">
+    <div class="ai-hd">
+      <h3 id="aiTitle">🤖 AI 风险解读</h3>
+      <button class="ai-x" onclick="closeAiModal()" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <div id="aiBody"></div>
+  </div>
+</div>
+
+<div class="modal" id="modal">
+  <div class="mbox">
+    <h3>💡 风险科普</h3>
+    <p id="mtext"></p>
+    <button class="mclose" onclick="document.getElementById('modal').classList.remove('on')">知道了</button>
+  </div>
+</div>
+
+<!-- 工具简介说明弹窗 -->
+<div class="modal" id="aboutModal">
+  <div class="mbox">
+    <div class="ai-hd">
+      <h3>📖 网址慧眼 · 使用说明</h3>
+      <button class="ai-x" onclick="closeAboutModal()" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <div class="about-sec">
+      <div class="about-t">🔍 查网址风险</div>
+      <p class="about-p">粘贴一个网址，自动检测它是否安全——包括跳转链路、域名档案（注册商/IP/备案）、SSL 证书、风险评级与 AI 解读，帮你识别钓鱼、诈骗、恶意站点。</p>
+    </div>
+    <div class="about-sec">
+      <div class="about-t">🧭 看网站用途</div>
+      <p class="about-p">检测后会自动用一句话告诉你这个网站是干什么的、属于什么类型（音乐、视频、网盘、企业官网、钓鱼页等）。</p>
+    </div>
+    <div class="about-sec">
+      <div class="about-t">🎯 按需求找正规站点</div>
+      <p class="about-p">不用输入网址，直接描述需求（比如「听音乐」「看小说」「找工作」），我会联网检索并推荐国内正规、可正常打开的站点，每个都经过连通性与安全校验。</p>
+    </div>
+    <div class="about-tip">⚠️ 结果仅供参考，不构成安全担保；涉及资金、账号操作请务必核实官方渠道。</div>
+    <button class="mclose" onclick="closeAboutModal()">知道了</button>
+  </div>
+</div>
+
+<div class="modal qrmodal" id="qrModal">
+  <div class="mbox">
+    <div class="ai-hd">
+      <h3>📱 二维码预览</h3>
+      <button class="ai-x" onclick="closeQrModal()" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <div class="qr-body">
+      <canvas id="qrCanvas"></canvas>
+      <div class="qr-hint">扫描访问该链接</div>
+      <div class="qr-url" id="qrUrl"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 功能10：模板管理弹窗 -->
+<div class="modal tplmodal" id="tplModal">
+  <div class="mbox">
+    <div class="ai-hd">
+      <h3>📌 管理预设模板</h3>
+      <button class="ai-x" onclick="closeTplModal()" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <div class="tpl-form" id="tplForm" style="display:none">
+      <div class="fld">
+        <label for="tplName">模板名称</label>
+        <input id="tplName" placeholder="例如：公司官网检测" maxlength="30">
+      </div>
+      <div class="fld">
+        <label for="tplUrl">网址</label>
+        <input id="tplUrl" placeholder="https://example.com/">
+      </div>
+      <div class="tpl-actions">
+        <button class="hbtn" id="tplCancel" onclick="cancelTplForm()">取消</button>
+        <button class="hbtn" id="tplSave" onclick="saveTplForm()">保存</button>
+      </div>
+    </div>
+    <div class="tpl-list" id="tplList"></div>
+    <div class="tpl-actions">
+      <button class="hbtn" onclick="fillSelectedTpls()">⬇ 批量填入选中</button>
+      <button class="hbtn" onclick="showTplForm()">＋ 新增模板</button>
+      <button class="hbtn danger" onclick="closeTplModal()">关闭</button>
+    </div>
+    <div class="tpl-hint">内置模板带 🔒 锁定，不可编辑删除；自定义模板可编辑、删除。勾选多个模板后点「批量填入选中」可一键填入批量输入区。模板数据保存在本机浏览器 localStorage。</div>
+  </div>
+</div>
+
+<!-- 站点库扩充：手动添加站点弹窗 -->
+<div class="modal tplmodal" id="addSiteModal">
+  <div class="mbox">
+    <div class="ai-hd">
+      <h3>➕ 添加站点</h3>
+      <button class="ai-x" onclick="closeAddSiteModal()" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <div class="tpl-form">
+      <div class="fld">
+        <label for="addSiteName">网站名称 <b style="color:var(--red)">*</b></label>
+        <input id="addSiteName" placeholder="例如：哔哩哔哩" maxlength="40">
+      </div>
+      <div class="fld">
+        <label for="addSiteUrl">网址 <b style="color:var(--red)">*</b></label>
+        <input id="addSiteUrl" placeholder="https://www.bilibili.com/">
+      </div>
+      <div class="fld">
+        <label for="addSiteTags">标签（逗号分隔）</label>
+        <input id="addSiteTags" placeholder="视频,弹幕,二次元" maxlength="100">
+      </div>
+      <div class="fld">
+        <label for="addSiteSummary">备注（一句话简介）</label>
+        <input id="addSiteSummary" placeholder="B站正版视频社区" maxlength="200">
+      </div>
+      <div class="fld">
+        <label for="addSiteCategory">分类</label>
+        <input id="addSiteCategory" placeholder="视频" maxlength="30">
+      </div>
+      <div class="tpl-actions">
+        <button class="hbtn" id="addSiteCancel" onclick="closeAddSiteModal()">取消</button>
+        <button class="hbtn" id="addSiteSubmit" onclick="submitAddSite()">提交入库</button>
+      </div>
+      <div class="tpl-hint" id="addSiteHint">提交后会自动校验：网址格式 → 违规词 → 域名合规 → 可访问性 → 安全风险，全部通过才收录。高危、盗版、打不开的链接会被拒绝。</div>
+    </div>
+  </div>
+</div>
+
+<!--
+  engine.js 引用说明：
+  现在由 serve.py（防缓存静态服务）提供 no-store 响应头，浏览器不会再缓存，
+  所以这里用最标准的 script src 写法即可（注释里不要写字面的尖括号标签，
+  否则提取脚本的工具会把它误认成真标签）。
+  保留 ?t= 时间戳作为第二层保险（万一是用旧的 http.server 启动的）。
+  注意：不要用 document.write 动态插入脚本，部分浏览器插件会拦截它。
+-->
+<script src="engine.js?t=20261022-4"></script>
+<script>
+// 兜底：engine.js 没加载成功时（没起 serve.py / 网络 / 插件拦截）给出明确提示，
+// 否则页面会静默卡住，用户不知道发生了什么。
+// 检测时机放在 window 的 load 事件之后，确保 engine.js 已经有足够时间加载。
+window.addEventListener('load', function () {
+  if (!window.WZH) {
+    var msg = '<div class="hist-empty">脚本加载失败。<br>'
+            + '请确认前端服务是用 <b>python serve.py</b> 启动的（而不是 python -m http.server），'
+            + '然后按 Ctrl+F5 强制刷新。</div>';
+    var hb = document.getElementById('histBody');
+    if (hb) hb.innerHTML = msg;
+    var s = document.getElementById('send');
+    if (s) s.disabled = true;
+    var b = document.getElementById('batchBtn');
+    if (b) b.disabled = true;
+  }
+});
+</script>
+<script>
+const E = window.WZH;
+const $ = id => document.getElementById(id);
+let MODE = 'normal';
+
+document.querySelectorAll('.mbtn').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('.mbtn').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    MODE = b.dataset.m === 'normal' ? null : b.dataset.m;
+  };
+});
+$('send').onclick = run;
+$('ta').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run(); } };
+
+/* ============================================================
+   功能2：深色/浅色主题切换
+   - 主题值存 localStorage['wzh_theme']，刷新/重开都记得
+   - <head> 里的内联脚本已在 CSS 加载前读取过一次，这里只负责按钮状态同步
+   ============================================================ */
+// 注意：THEME_KEY 已在 engine.js 里声明为顶层 const（并随 window.WZH 导出为 E.THEME_KEY）。
+// 两个 <script> 共享同一个全局词法作用域，这里若再声明 const THEME_KEY 会抛
+// SyntaxError: Identifier 'THEME_KEY' has already been declared，导致整个主脚本不执行。
+// 因此此处不再重复声明，用到 localStorage 键名时直接取 E.THEME_KEY。
+
+// 读当前生效的主题（html 上有 data-theme 就是浅色，否则深色）
+function currentTheme() {
+  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+}
+
+// 只改按钮文案，不改主题
+function syncThemeBtn() {
+  const btn = $('themeBtn');
+  if (!btn) return;
+  btn.textContent = currentTheme() === 'light' ? '🌙 深色模式' : '☀️ 浅色模式';
+}
+
+// 切换主题：改 html 属性 + 写localStorage + 更新按钮
+function toggleTheme() {
+  const next = currentTheme() === 'light' ? 'dark' : 'light';
+  if (next === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+  try {
+    localStorage.setItem(E.THEME_KEY, next);
+  } catch (e) { /* 隐私模式下写不进去也不影响本次切换 */ }
+  syncThemeBtn();
+}
+
+// 页面加载时同步一次按钮文案（主题本身已由 <head> 内联脚本设好）
+syncThemeBtn();
+
+/* ============================================================
+   功能3：批量网址检测
+   - 一行一个网址，自动预处理（去空白/滤空行/补协议/去重）
+   - 点击后锁定按钮 + 显示加载动画，请求结束自动解锁
+   - 后端原生支持 url 传数组，无需循环调用单条接口；
+     但后端单次上限 5 条，故按 5 条一批顺序发送（见 engine.js batchDetect）
+   - 结果用表格展示，网址可点击 → 回填输入框并执行单次检测（自动存历史）
+   ============================================================ */
+let batchRunning = false;   // 防止重复提交的锁
+
+// 功能4：保存"最近一次批量检测"的原始结果，供导出使用。
+// 声明在这里而不是功能4 章节，是为了跟 batchDetect 挨着，避免读代码时到处找。
+let lastBatchRows = null;
+
+async function batchDetect() {
+  // 已在检测中就直接忽略本次点击
+  if (batchRunning) return;
+
+  // ---------- 1. 解析输入 ----------
+  // 引擎没加载成功时的守卫
+  if (!window.WZH || typeof E.parseBatchInput !== 'function') {
+    alert('脚本未正确加载，请按 Ctrl+F5 强制刷新页面');
+    return;
+  }
+  const parsed = E.parseBatchInput($('ta').value);
+  const urls = parsed.urls;
+  const invalid = parsed.invalid;
+
+  // 没有有效网址：不发请求，直接友好提示
+  if (urls.length === 0) {
+    alert('没有输入有效的网址。\n\n批量检测请一行填写一个网址，例如：\nhttps://example.com\nhttps://test.org');
+    return;
+  }
+
+  // ---------- 2. 上锁 + 显示加载态 ----------
+  batchRunning = true;
+  const btn = $('batchBtn');
+  btn.disabled = true;
+  btn.classList.add('loading');
+  btn.textContent = '⏳ 检测中…';
+
+  // 无效行超过有效行时提醒一下，但不阻断
+  let tip = '';
+  if (invalid.length) {
+    tip = `<div class="warn warn-warning" style="margin-bottom:12px"><span class="wt">已跳过 ${invalid.length} 行无效内容</span>${invalid.slice(0, 3).map(x => escapeHtml(x.raw)).join('、')}${invalid.length > 3 ? ' 等' : ''}</div>`;
+  }
+  const overLimit = urls.length > 5 ? `<div class="bt-prog">共 ${urls.length} 个网址，将分 ${Math.ceil(urls.length / 5)} 批检测（后端单次上限 5 条）</div>` : '';
+
+  const box = add(`<h3>📋 批量检测结果</h3>
+    ${tip}
+    <div class="bt-loading"><span class="bt-spin"></span><span id="btTip">正在检测 ${urls.length} 个网址…</span></div>
+    ${overLimit}`);
+
+  // ---------- 3. 请求 ----------
+  try {
+    const res = await E.batchDetect(urls, { saveHistory: true });
+
+    // 功能4：把本次批量结果另存一份，供「导出本次批量结果」使用。
+    // 只新增这一个赋值，不改动上面任何批量检测的业务逻辑。
+    // ⚠️ 必须在 renderBatchRows 之前赋值：筛选栏的计数与"共 N 条"分母都读它，
+    //    顺序颠倒会让批量筛选栏首次渲染时全部显示 0。
+    lastBatchRows = res.rows;
+    // 功能8：批量结果更新后刷新统计看板
+    refreshDash();
+    // 把加载条替换成结果表格
+    const rowsHtml = renderBatchRows(res.rows);
+    box.innerHTML = `<h3>📋 批量检测结果</h3>
+      ${tip}
+      <div class="htable-wrap">${rowsHtml}</div>
+      <div class="bt-prog">共检测 ${res.rows.length} 个网址`;
+    // 失败批次提示
+    if (res.failedBatches > 0) {
+      box.innerHTML += `，其中 ${res.failedBatches} 批请求失败`;
+    }
+    box.innerHTML += `　·　点击表格中的网址可重新单条检测</div>`;
+
+    // 检测完刷新历史面板（批量已写入历史）
+    loadHistory(1);
+
+  } catch (e) {
+    // 整批异常：给清晰提示，不让页面崩
+    box.innerHTML = `<h3>📋 批量检测结果</h3>
+      <div class="warn warn-caution"><span class="wt">批量检测失败</span>请求过程中出现异常：${escapeHtml(String(e.message || e))}<br>请确认 Flask 后端已启动后重试。</div>`;
+  } finally {
+    // ---------- 4. 无论成功失败都解锁 ----------
+    batchRunning = false;
+    btn.disabled = false;
+    btn.classList.remove('loading');
+    btn.textContent = '📋 批量检测';
+  }
+}
+
+// 渲染批量结果表格
+function renderBatchRows(rows) {
+  if (!rows || rows.length === 0) {
+    return '<div class="hist-empty">没有可展示的结果</div>';
+  }
+  // 功能5：把本次批量结果挂到 window 上，供表格里的 AI解读按钮按下标取数据。
+  // 这样 onclick 里不用塞一长串参数，也不会因为网址里的引号把 HTML 弄坏。
+  window.__wzhBatchRows = rows;
+
+  // 功能6：对**原始数据**套用筛选。
+  // 注意必须每次都从 rows 重新过滤，不能拿上次过滤的结果再过滤 ——
+  // 被裁掉的行一旦丢掉，「清空筛选」就恢复不回来了。
+  const shown = E.applyFilterTags(rows, filterTags, 'batch');
+
+  // 没有命中任何条目：给友好提示，不空白卡死
+  if (shown.length === 0) {
+    return buildFilterBarHtml('batch')
+      + '<div class="hist-empty">没有符合当前筛选条件的记录</div>';
+  }
+
+  // ⚠️ 这里用 shown 的下标去取 window.__wzhBatchRows，
+  //    必须改成按对象引用取，否则筛选后下标会错位，AI解读会解读到别的行。
+  const trs = shown.map(r => {
+    // 只有 unknown（检测不出结论）才显示补充说明，用中性色不惊悚；
+    // 正常结果不带说明，保持表格干净
+    const note = r.note ? `<span class="bt-note">${escapeHtml(r.note)}</span>` : '';
+    const i = rows.indexOf(r);
+    // 功能5：AI解读按钮，this 作为锁定目标
+    const aiBtn = `<button class="aibtn" onclick="aiInterpretFromRow(window.__wzhBatchRows[${i}], this)">🤖 AI解读</button>`;
+    // 功能7：复制 + 二维码（data-url 取原始网址，跟随筛选行同步显隐）
+    const cpBtn = `<button class="aibtn" data-url="${escapeHtml(r.url)}" onclick="copyLinkFrom(this)" title="复制链接">🔗 复制</button>`;
+    const qrBtn = `<button class="aibtn" data-url="${escapeHtml(r.url)}" onclick="openQrFrom(this)" title="预览二维码">📱 二维码</button>`;
+    // 功能9：收藏星标（批量行无 finalUrl/createdAt，收藏时留空）
+    const favBtn = `<button class="${isFavUrl(r.url) ? 'fav-btn on' : 'fav-btn'}" data-url="${escapeHtml(r.url)}" data-label="${escapeHtml(r.label || '')}" onclick="toggleFavoriteFrom(this)" title="${isFavUrl(r.url) ? '取消收藏' : '收藏'}">${isFavUrl(r.url) ? '★' : '☆'}</button>`;
+    return `
+      <tr>
+        <td>
+          <button class="bt-url" onclick="reuseBatchUrl('${escapeAttr(r.url)}')">${escapeHtml(r.url)}</button>
+          ${note}
+        </td>
+        <td><span class="lv ${r.level || 'unknown'}">${escapeHtml(r.label || '未知')}</span></td>
+        <td class="row-actions">${favBtn}${cpBtn}${qrBtn}${aiBtn}</td>
+      </tr>`;
+  }).join('');
+
+  return buildFilterBarHtml('batch') + `<div class="htable-wrap"><table class="htable">
+    <thead><tr><th>网址（点击可重新检测）</th><th style="width:110px">风险结论</th><th style="width:230px">操作</th></tr></thead>
+    <tbody>${trs}</tbody>
+  </table></div>`;
+}
+
+// 点击表格里的网址 → 回填输入框 → 执行单次检测（会自动存入历史）
+function reuseBatchUrl(url) {
+  if (!url) return;
+  $('ta').value = url;
+  run();
+}
+
+function add(html) {
+  const d = document.createElement('div');
+  d.className = 'answer';
+  d.innerHTML = html;
+  $('out').appendChild(d);
+  d.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+/** 加入白名单 —— 调用后端真实接口 */
+async function addToWhitelist(url) {
+  try {
+    const r = await E.postJSON('/history/whitelist', { url });
+    if (r.code === 200) {
+      add(`<h3>✅ 已加入白名单</h3><div class="warn warn-info"><span class="wt">操作成功</span>${url}<br>后续检测该链接时将优先参考白名单记录。</div>`);
+    } else {
+      add(`<h3>⚠️ 加入失败</h3><div class="warn warn-warning"><span class="wt">${r.msg || '操作未成功'}</span>${url}</div>`);
+    }
+  } catch (e) {
+    add(`<h3>⚠️ 服务未连接</h3><div class="warn warn-warning"><span class="wt">无法连接后端</span>请确认服务已启动后重试。</div>`);
+  }
+}
+
+/** 上报恶意站点 —— 走反馈上报接口 */
+async function reportMalicious(url) {
+  try {
+    const r = await E.postJSON('/feedback/submit', {
+      type: 'phishing',
+      url: url,
+      message: '用户举报：该链接存在安全风险'
+    });
+    if (r.code === 200) {
+      add(`<h3>🚨 已提交上报</h3><div class="warn warn-info"><span class="wt">上报成功</span>${url}<br>${r.data.note || '反馈已记录，后台会定期人工复核该站点状态并优化站点库。'}</div>`);
+    } else {
+      add(`<h3>⚠️ 上报失败</h3><div class="warn warn-warning"><span class="wt">${r.msg || '操作未成功'}</span>${url}</div>`);
+    }
+  } catch (e) {
+    add(`<h3>⚠️ 服务未连接</h3><div class="warn warn-warning"><span class="wt">无法连接后端</span>请确认服务已启动后重试。</div>`);
+  }
+}
+
+/** 推荐站点反馈 —— 调用后端真实反馈接口 */
+async function submitSiteFeedback(name, url, reason) {
+  const hasUrl = !!url;
+  const payload = {
+    type: hasUrl ? 'tooManyAds' : 'badRecommend',
+    url: url || '',
+    message: (name ? `站点：${name}　` : '') + reason
+  };
+  try {
+    const r = await E.postJSON('/feedback/submit', payload);
+    if (r.code === 200) {
+      add(`<h3>✅ 反馈已提交</h3><div class="warn warn-info"><span class="wt">提交成功${r.data.typeLabel ? ' · ' + r.data.typeLabel : ''}</span>${name ? '站点：' + name + '<br>' : ''}${url ? url + '<br>' : ''}${r.data.note || '反馈已记录，后台会定期人工复核该站点状态并优化站点库。'}</div>`);
+    } else {
+      add(`<h3>⚠️ 提交失败</h3><div class="warn warn-warning"><span class="wt">${r.msg || '操作未成功'}</span>${url ? url : ''}</div>`);
+    }
+  } catch (e) {
+    add(`<h3>⚠️ 服务未连接</h3><div class="warn warn-warning"><span class="wt">无法连接后端</span>请确认服务已启动后重试。</div>`);
+  }
+}
+
+// 站点反馈按钮的包装：从 data-* 属性取值再调 submitSiteFeedback。
+// 不把站点名/网址拼进 onclick 字符串——网址含单引号会把 JS 字符串截断
+function submitSiteFeedbackFrom(btn) {
+  const name = btn.getAttribute('data-name') || '';
+  const url = btn.getAttribute('data-url') || '';
+  const reason = url
+    ? '站点信息有误（广告标注/失效等）'
+    : '推荐结果整体反馈';
+  submitSiteFeedback(name, url, reason);
+}
+
+/* ============================================================
+   功能1：历史记录
+   - 页面加载自动读取
+   - 支持重新查询（回填输入框）、删除单条、一键清空
+   - 检测成功后自动刷新
+   ============================================================ */
+const HIST_PAGE_SIZE = 10;          // 每页显示多少条
+let histPage = 1;                    // 当前页码
+let histTotal = 0;                   // 总记录数
+
+// 读取历史列表
+async function loadHistory(page = 1) {
+  histPage = page;
+  const box = $('histBody');
+  try {
+    // 调用后端已有的查询接口 GET /api/v1/history/list
+    const r = await E.requestJSON('/history/list?page=' + page + '&size=' + HIST_PAGE_SIZE);
+    if (r.code !== 200) {
+      box.innerHTML = '<div class="hist-empty">读取失败：' + (r.msg || '未知错误') + '</div>';
+      return;
+    }
+const d = r.data || {};
+    const items = d.items || [];
+    histTotal = d.total || 0;
+
+    $('histCnt').textContent = histTotal ? '共 ' + histTotal + ' 条' : '';
+
+    if (items.length === 0) {
+      // 功能6：清空原始数据缓存，避免上次的筛选状态作用到空结果上
+      histRawItems = [];
+      box.innerHTML = '<div class="hist-empty">还没有检测记录，去上面检测一个网址试试～</div>';
+      $('histPager').style.display = 'none';
+      // 筛选栏仍要渲染出来（全部 0 条），否则切换筛选状态后区域是空白的
+      const fb0 = $('histFilterBar');
+      if (fb0) fb0.outerHTML = buildFilterBarHtml('history');
+      return;
+    }
+
+    // 功能6：缓存当前页原始数据；渲染统一走 renderHistoryBody，
+// 它内部会按 filterTags 决定是否过滤。没选中标签时输出与原来完全一致的表格。
+// loadHistory 的接口调用与状态更新逻辑未改动。
+    histRawItems = items;
+    renderHistoryBody();
+
+    // 功能6：刷新历史筛选栏（条数与选中态要与当前页数据一致）
+    const fbar = $('histFilterBar');
+    if (fbar) fbar.outerHTML = buildFilterBarHtml('history');
+
+    // 分页按钮（只有多页才显示）
+    const pages = Math.ceil(histTotal / HIST_PAGE_SIZE);
+    if (pages > 1) {
+      $('histPager').style.display = 'flex';
+      $('histPageInfo').textContent = '第 ' + page + ' / ' + pages + ' 页';
+      $('histPrev').disabled = page <= 1;
+      $('histNext').disabled = page >= pages;
+    } else {
+      $('histPager').style.display = 'none';
+    }
+    // 功能8：历史面板刷新后，看板处于历史模式时同步刷新全量统计缓存
+    if (typeof dashSource !== 'undefined' && dashSource === 'history') {
+      refreshDashHistory();
+    }
+  } catch (e) {
+    // 后端没启动时不要让页面报错
+    box.innerHTML = '<div class="hist-empty">无法连接后端服务，请确认 Flask 已启动</div>';
+    $('histCnt').textContent = '';
+  }
+}
+
+// 重新查询：把历史网址回填到输入框并直接发起检测
+function reuseHistory(url) {
+  if (!url) return;
+  $('ta').value = url;
+  run();
+}
+
+// 删除单条
+async function deleteHistory(id) {
+  if (!confirm('确定要删除这条检测记录吗？')) return;
+  try {
+    const r = await E.requestJSON('/history/' + id, { method: 'DELETE' });
+    if (r.code === 200) {
+      // 删掉当前页最后一条时自动往前翻一页，避免停在空白页
+      const rows = $('histBody').querySelectorAll('tbody tr');
+      if (rows.length === 1 && histPage > 1) histPage -= 1;
+      loadHistory(histPage);
+    } else {
+      alert('删除失败：' + (r.msg || '未知错误'));
+    }
+  } catch (e) {
+    alert('删除失败：无法连接后端服务');
+  }
+}
+
+// 一键清空
+async function clearHistory() {
+  if (!histTotal) { alert('当前没有历史记录'); return; }
+  if (!confirm('确定要清空全部 ' + histTotal + ' 条历史记录吗？此操作不可恢复！')) return;
+  try {
+    const r = await E.requestJSON('/history/clear', { method: 'POST' });
+    if (r.code === 200) {
+      alert('已清空 ' + (r.data.deletedCount || 0) + ' 条记录');
+      histPage = 1;
+      loadHistory(1);
+    } else {
+      alert('清空失败：' + (r.msg || '未知错误'));
+    }
+  } catch (e) {
+    alert('清空失败：无法连接后端服务');
+  }
+}
+
+// 转义，防止网址里的特殊字符破坏 HTML 结构
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+// 转义后放进 onclick 字符串用（把单引号也转掉，避免引号冲突）
+function escapeAttr(s) {
+  return escapeHtml(s).replace(/\\/g, '\\\\');
+}
+
+// ============================================================
+// 功能4：导出 TXT 报告
+// ------------------------------------------------------------
+// 两种导出模式：
+//   模式A「本次批量结果」——数据源是内存里的 lastBatchRows，
+//         批量检测完成时已经存下来了，这里直接用，不发任何请求。
+//   模式B「全部历史记录」——数据源是后端现成的 GET /history/list，
+//         用 size=100000 一次拉全量（后端对 size 有上限保护，见下方处理），
+//         **不新增任何后端接口**。
+//
+// 文本组装、文件名生成、下载触发全部在 engine.js 的纯逻辑函数里，
+// 本节只负责：取数据 → 调引擎 → 提示用户。
+// ============================================================
+
+// 历史导出单次最多拉多少条。
+// 后端 config 里有分页上限，超出会被截断，这里保守取 500 条，
+// 足够覆盖正常使用，同时避免一次请求过大。
+const EXPORT_HISTORY_MAX = 500;
+
+let exportRunning = false;   // 防止重复点击导出
+
+// ---------- 浮层提示 ----------
+// 用轻量的浮层而不是 alert：alert 会阻塞页面，用户体验差。
+let expTipTimer = null;
+function showExpTip(msg, kind, keepMs) {
+  const el = $('expTip');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'exptip on' + (kind ? ' ' + kind : '');
+  // 重新触发前先清掉上一次的定时器，避免提示提前消失
+  if (expTipTimer) clearTimeout(expTipTimer);
+  // keepMs 不传时默认 2.6 秒；报错类停留久一点让用户看清
+  expTipTimer = setTimeout(hideExpTip, keepMs || 2600);
+}
+function hideExpTip() {
+  const el = $('expTip');
+  if (el) el.className = 'exptip';
+}
+
+// ---------- 菜单开合 ----------
+function toggleExportMenu(ev) {
+  // 阻止冒泡，否则下面挂在 document 上的"点击外部关闭"会立刻把菜单关掉
+  if (ev) ev.stopPropagation();
+  const menu = $('expMenu');
+  if (!menu) return;
+  refreshExportMenuCount();
+  menu.classList.toggle('on');
+}
+// 点击菜单外部时关闭菜单
+document.addEventListener('click', function () {
+  const menu = $('expMenu');
+  if (menu) menu.classList.remove('on');
+});
+// 按 Esc 也关闭，照顾键盘操作
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') {
+    const menu = $('expMenu');
+    if (menu) menu.classList.remove('on');
+  }
+});
+
+// ---------- 刷新菜单里的可导出条数提示 ----------
+// 让用户点开菜单就知道哪个范围是空的，不用点了才知道。
+function refreshExportMenuCount() {
+  const batchCnt = $('expBatchCnt');
+  const histCnt = $('expHistoryCnt');
+  const filteredCnt = $('expFilteredCnt');
+
+  if (batchCnt) {
+    const n = lastBatchRows ? lastBatchRows.length : 0;
+    batchCnt.textContent = n ? '共 ' + n + ' 条可导出' : '暂无批量结果';
+  }
+  if (histCnt) {
+    histCnt.textContent = histTotal ? '共 ' + histTotal + ' 条可导出' : '暂无历史记录';
+  }
+  // 功能6：第三项显示当前筛选命中了多少条
+  if (filteredCnt) {
+    if (filterTags.length === 0) {
+      filteredCnt.textContent = '未启用筛选';
+    } else {
+      // 批量与历史都算上，取较大值作为提示（实际导出以数据源为准）
+      const b = lastBatchRows ? E.applyFilterTags(lastBatchRows, filterTags, 'batch').length : 0;
+      const h = E.applyFilterTags(histRawItems, filterTags, 'history').length;
+      const n = Math.max(b, h);
+      filteredCnt.textContent = n ? '共 ' + n + ' 条可导出' : '当前筛选无匹配记录';
+    }
+  }
+  // 功能9：收藏夹条数
+  const favCnt = $('expFavCnt');
+  if (favCnt) {
+    const n = getFavorites().length;
+    favCnt.textContent = n ? '共 ' + n + ' 条可导出' : '暂无收藏';
+  }
+}
+
+/**
+ * 拉取全部历史记录。
+ * 后端 /history/list 是分页接口，这里循环翻页把所有页都取回来，
+ * 直到取满上限或某一页返回空。
+ * 注意：这里只是**读取**现有接口，没有改动它，也没有新增接口。
+ */
+async function fetchAllHistory() {
+  const all = [];
+  const PAGE = 100;
+  let page = 1;
+
+  while (all.length < EXPORT_HISTORY_MAX) {
+    const r = await E.requestJSON('/history/list?page=' + page + '&size=' + PAGE);
+    if (r.code !== 200) {
+      throw new Error(r.msg || '读取历史记录失败');
+    }
+    const d = r.data || {};
+    const items = d.items || [];
+    if (items.length === 0) break;          // 没有更多了
+    all.push.apply(all, items);
+
+    // 取够了或者这页没满，说明已经到最后一页
+    if (items.length < PAGE || all.length >= (d.total || 0)) break;
+    page++;
+  }
+
+  return all.slice(0, EXPORT_HISTORY_MAX);
+}
+
+/**
+ * 执行导出。
+ * @param {'batch'|'history'} scope 导出范围
+ */
+async function doExport(scope) {
+  // 正在导出就忽略重复点击
+  if (exportRunning) return;
+
+  // 引擎守卫：没加载成功时给出明确提示，而不是静默失败
+  if (!window.WZH || typeof E.buildReportText !== 'function') {
+    alert('脚本未正确加载，请按 Ctrl+F5 强制刷新页面');
+    return;
+  }
+
+  // 先把菜单关掉，避免遮住后续的浮层提示
+  const menu = $('expMenu');
+  if (menu) menu.classList.remove('on');
+
+  // ---------- 模式A：本次批量检测结果 ----------
+  if (scope === 'batch') {
+    const rows = lastBatchRows;
+    if (!rows || rows.length === 0) {
+      showExpTip('还没有批量检测结果，请先点击「📋 批量检测」', 'warn', 3200);
+      return;
+    }
+    // 纯本地组装，不发请求，所以没有加载态
+    const text = E.buildReportText(rows, { source: 'batch' });
+    if (!text) {
+      showExpTip('批量结果为空，无法导出', 'warn', 3200);
+      return;
+    }
+    finishExport(E.downloadTxtFile(text, E.buildReportFileName()), rows.length);
+    return;
+  }
+
+  // ---------- 模式B：全部历史记录 ----------
+  if (scope === 'history') {
+    // 没点过刷新时 histTotal 可能是 0，先用一次轻量判断，避免误报"暂无数据"
+    if (histTotal === 0) {
+      showExpTip('正在读取历史记录…');
+    } else {
+      showExpTip('正在导出 ' + histTotal + ' 条历史记录…');
+    }
+
+    exportRunning = true;
+    const btn = $('expBtn');
+    if (btn) { btn.disabled = true; btn.classList.add('loading'); }
+
+    try {
+      const rows = await fetchAllHistory();
+      if (!rows || rows.length === 0) {
+        showExpTip('还没有历史记录可导出，先检测一个网址试试～', 'warn', 3200);
+        return;
+      }
+      const text = E.buildReportText(rows, { source: 'history' });
+      if (!text) {
+        showExpTip('历史记录为空，无法导出', 'warn', 3200);
+        return;
+      }
+      finishExport(E.downloadTxtFile(text, E.buildReportFileName()), rows.length);
+    } catch (e) {
+      showExpTip('导出失败：无法连接后端服务，请确认 Flask 已启动', 'err', 4000);
+    } finally {
+      exportRunning = false;
+      if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
+    }
+    return;
+  }
+
+  // ---------- 模式C（功能6）：当前筛选结果 ----------
+  // 复用原有导出逻辑：批量数据用 source:'batch'，历史数据用 source:'history'。
+  // 哪个区域有筛选结果就导哪个；两边都有则优先批量（它是用户刚看到的）。
+  if (scope === 'filtered') {
+    if (filterTags.length === 0) {
+      showExpTip('当前未启用筛选条件，请先在上方或批量结果处选择标签', 'warn', 3400);
+      return;
+    }
+
+    // 批量区：数据在内存，无需请求
+    const bRows = lastBatchRows ? E.applyFilterTags(lastBatchRows, filterTags, 'batch') : [];
+    if (bRows.length > 0) {
+      const text = E.buildReportText(bRows, { source: 'batch' });
+      if (!text) {
+        showExpTip('筛选结果为空，无法导出', 'warn', 3200);
+        return;
+      }
+      finishExport(E.downloadTxtFile(text, E.buildReportFileName()), bRows.length);
+      return;
+    }
+
+    // 历史区：需要拉全量后再过滤（后端分页，当前页不足以代表全部）
+    showExpTip('正在读取并筛选历史记录…');
+    exportRunning = true;
+    const btn = $('expBtn');
+    if (btn) { btn.disabled = true; btn.classList.add('loading'); }
+    try {
+      const all = await fetchAllHistory();
+      const hRows = E.applyFilterTags(all, filterTags, 'history');
+      if (hRows.length === 0) {
+        showExpTip('当前筛选条件下没有可导出的记录', 'warn', 3400);
+        return;
+      }
+      const text = E.buildReportText(hRows, { source: 'history' });
+      if (!text) {
+        showExpTip('筛选结果为空，无法导出', 'warn', 3200);
+        return;
+      }
+      finishExport(E.downloadTxtFile(text, E.buildReportFileName()), hRows.length);
+    } catch (e) {
+      showExpTip('导出失败：无法连接后端服务，请确认 Flask 已启动', 'err', 4000);
+    } finally {
+      exportRunning = false;
+      if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
+    }
+    return;
+  }
+
+  // ---------- 模式D（功能9）：收藏夹导出 ----------
+  // 纯前端：收藏数据在 localStorage，不发请求。
+  if (scope === 'favorites') {
+    const favs = getFavorites().map(function (it) { return E.favoriteView(it); });
+    const fRows = E.applyFilterTags(favs, filterTags, 'history');
+    if (fRows.length === 0) {
+      showExpTip('收藏夹为空或当前筛选下无记录', 'warn', 3200);
+      return;
+    }
+    const text = E.buildReportText(fRows, { source: 'history' });
+    if (!text) {
+      showExpTip('收藏为空，无法导出', 'warn', 3200);
+      return;
+    }
+    finishExport(E.downloadTxtFile(text, E.buildReportFileName()), fRows.length);
+    return;
+  }
+
+  showExpTip('未知的导出范围', 'err', 3000);
+}
+
+// 下载成功后的统一提示
+function finishExport(ok, count) {
+  if (ok) {
+    showExpTip('✅ 已导出 ' + count + ' 条记录，文件名：' + E.buildReportFileName(), 'ok', 3600);
+  } else {
+    showExpTip('导出失败，浏览器可能拦截了下载，请检查下载设置', 'err', 4000);
+  }
+}
+
+// ============================================================
+// 功能6：检测结果标签筛选
+// ------------------------------------------------------------
+// 一套标签体系，两个区域共用：批量结果表格 + 历史记录列表。
+// 筛选是**纯前端本地过滤**，不调任何后端接口。
+//
+// 状态只有一个全局变量 filterTags（数组），
+// 两个区域都读它 —— 这样天然满足「切换面板时筛选状态保留」。
+//
+// ⚠️ 历史区有 4 个标签是置灰不可点的（抓取失败/解析失败/短链中转/跳转风险）。
+//    原因：后端 history/list 只返回 id/originalUrl/finalUrl/domain/riskLevel/
+//    riskLabel/riskCount/expandHops/isOverseas/icpSubject/source/createdAt，
+//    没有 risks 明细、没有 isLoop、没有 degradeNote，硬猜会给出误导性结果。
+//    置灰是诚实降级：告诉用户"这个标签在这块用不了"，而不是假装能筛。
+// ============================================================
+
+// 当前选中的标签 key 数组（空 = 不筛选）
+let filterTags = [];
+
+// 各区域的原始数据缓存，筛选/清空时重新渲染用。
+// 刻意与渲染逻辑分离：原始数据只存一份，任何时候都能从它重新过滤。
+let histRawItems = [];      // 历史记录：当前页的原始 items
+
+/**
+ * 生成筛选栏 HTML。
+ *
+ * @param {'batch'|'history'} area 区域
+ * @returns {string} 筛选栏 HTML
+ */
+function buildFilterBarHtml(area) {
+  const isHist = area === 'history';
+  // 数据源：历史区取当前页缓存，批量区取 lastBatchRows
+  const src = isHist ? histRawItems : (lastBatchRows || []);
+  const counts = E.countByFilterTags(src, area);
+
+  const tags = E.FILTER_TAGS.map(function (t) {
+    // 该区域不可用的标签：置灰、禁用、光标 not-allowed，并给出 title 说明
+    const unusable = isHist && t.scope !== 'both';
+    // 该区不可用的标签即使存在于 filterTags，也不渲染成「已选中」，
+    // 否则会与置灰样式冲突（on + off 同时出现），让用户误以为历史区正按它筛选。
+    const selected = !unusable && filterTags.indexOf(t.key) >= 0;
+    const cls = ['ftag', 'c-' + t.color, selected ? 'on' : '', unusable ? 'off' : '']
+      .filter(Boolean).join(' ');
+    const n = counts[t.key] || 0;
+    const title = unusable ? E.FILTER_SCOPE_HINT : ('命中 ' + n + ' 条');
+    return `<button class="${cls}" title="${escapeAttr(title)}" data-area="${area}" data-key="${t.key}"`
+      + (unusable ? ' disabled' : '')
+      + ` onclick="toggleFilterTag('${t.key}', '${area}')">`
+      + `${escapeHtml(t.label)}<span class="n">${n}</span></button>`;
+  }).join('');
+
+  const clearing = filterTags.length > 0;
+  const shownCount = E.applyFilterTags(src, filterTags, area).length;
+  const resultInfo = clearing
+    ? `<span class="rs on">已筛选 ${shownCount} / ${src.length} 条</span>`
+    : '';
+
+  return `<div class="fbar" data-farea="${area}">
+    <span class="lb">🔎 筛选</span>
+    ${tags}
+    <button class="ftag clear" ${clearing ? '' : 'disabled'}
+      onclick="clearFilterTags('${area}')">✕ 清空筛选</button>
+    ${resultInfo}
+  </div>`;
+}
+
+/**
+ * 切换某个标签的选中状态（多选）。
+ * @param {string} key 标签 key
+ * @param {'batch'|'history'} area 区域
+ */
+function toggleFilterTag(key, area) {
+  // 命中已有则取消，否则加入
+  const i = filterTags.indexOf(key);
+  if (i >= 0) filterTags.splice(i, 1);
+  else filterTags.push(key);
+
+  refreshFilterViews(area);
+}
+
+/**
+ * 清空全部筛选。
+ * @param {'batch'|'history'} area 从哪个区域点的（决定先刷哪个）
+ */
+function clearFilterTags(area) {
+  if (filterTags.length === 0) return;
+  filterTags = [];
+  // 两个区域都刷新，保证状态一致
+  refreshFilterViews(area);
+  // 清空是不可撤销动作，给个轻提示
+  showExpTip('已清空筛选条件', 'ok', 1800);
+}
+
+/**
+ * 刷新指定区域的视图。
+ * 批量区直接用 lastBatchRows 重渲染表格；
+ * 历史区用 histRawItems 重渲染当前页（不重新请求后端）。
+ *
+ * @param {'batch'|'history'} area
+ */
+function refreshFilterViews(area) {
+  if (area === 'history') {
+    // 重渲染历史表格（不重新请求）
+    renderHistoryBody();
+    // 历史筛选栏是固定 DOM，直接替换 innerHTML 重绘标签选中态
+    const bar = $('histFilterBar');
+    if (bar) bar.outerHTML = buildFilterBarHtml('history');
+  } else if (area === 'favorites') {
+    // 功能9：收藏面板筛选
+    renderFavFilterBar();
+    renderFavorites();
+  } else {
+    // 批量表格在输出区里，需要重渲染最近一个批量结果
+    rerenderBatchTable();
+  }
+  // 导出菜单里的条数提示依赖筛选结果，一并刷新
+  refreshExportMenuCount();
+  // 功能8：筛选变化时同步刷新统计看板
+  refreshDash();
+}
+
+// 批量表格重渲染：找到页面上最后一个「📋 批量检测结果」卡片，替换其中的表格区
+function rerenderBatchTable() {
+  const answers = $('out').querySelectorAll('.answer');
+  // 从后往前找，因为后检测的在后面
+  for (let i = answers.length - 1; i >= 0; i--) {
+    const box = answers[i];
+    if (!box.querySelector('h3') || box.querySelector('h3').textContent.indexOf('批量检测结果') < 0) continue;
+
+    const rows = lastBatchRows;
+    if (!rows || rows.length === 0) {
+      box.innerHTML = '<h3>📋 批量检测结果</h3><div class="hist-empty">没有可展示的结果</div>';
+      return;
+    }
+    // 只替换筛选栏 + 表格这两块，保留上方的标题与提示信息
+    const newHtml = buildFilterBarHtml('batch') + (function () {
+      const shown = E.applyFilterTags(rows, filterTags, 'batch');
+      if (shown.length === 0) return '<div class="hist-empty">没有符合当前筛选条件的记录</div>';
+      const trs = shown.map(r => {
+        const note = r.note ? `<span class="bt-note">${escapeHtml(r.note)}</span>` : '';
+        const idx = rows.indexOf(r);
+        const aiBtn = `<button class="aibtn" onclick="aiInterpretFromRow(window.__wzhBatchRows[${idx}], this)">🤖 AI解读</button>`;
+        const cpBtn = `<button class="aibtn" data-url="${escapeHtml(r.url)}" onclick="copyLinkFrom(this)" title="复制链接">🔗 复制</button>`;
+        const qrBtn = `<button class="aibtn" data-url="${escapeHtml(r.url)}" onclick="openQrFrom(this)" title="预览二维码">📱 二维码</button>`;
+        const favBtn = `<button class="${isFavUrl(r.url) ? 'fav-btn on' : 'fav-btn'}" data-url="${escapeHtml(r.url)}" data-label="${escapeHtml(r.label || '')}" onclick="toggleFavoriteFrom(this)" title="${isFavUrl(r.url) ? '取消收藏' : '收藏'}">${isFavUrl(r.url) ? '★' : '☆'}</button>`;
+        return `
+          <tr>
+            <td>
+              <button class="bt-url" onclick="reuseBatchUrl('${escapeAttr(r.url)}')">${escapeHtml(r.url)}</button>
+              ${note}
+            </td>
+            <td><span class="lv ${r.level || 'unknown'}">${escapeHtml(r.label || '未知')}</span></td>
+            <td class="row-actions">${favBtn}${cpBtn}${qrBtn}${aiBtn}</td>
+          </tr>`;
+      }).join('');
+      return `<div class="htable-wrap"><table class="htable">
+        <thead><tr><th>网址（点击可重新检测）</th><th style="width:110px">风险结论</th><th style="width:230px">操作</th></tr></thead>
+        <tbody>${trs}</tbody>
+      </table></div>`;
+    })();
+
+    // 找到旧的筛选栏与表格，用新内容替换
+    const oldBar = box.querySelector('.fbar');
+    const oldTable = box.querySelector('.htable-wrap') || box.querySelector('.hist-empty');
+    if (oldBar) {
+      oldBar.insertAdjacentHTML('afterend', newHtml);
+      oldBar.remove();
+    } else if (oldTable) {
+      oldTable.insertAdjacentHTML('afterbegin', newHtml);
+      oldTable.remove();
+    } else {
+      box.innerHTML = '<h3>📋 批量检测结果</h3>' + newHtml;
+    }
+    return;
+  }
+}
+
+/**
+ * 重新渲染历史表格主体（不请求后端）。
+ * 从 loadHistory 里抽出这段是为了让筛选能复用，
+ * 但 loadHistory 本身的请求与状态更新逻辑保持原样未动。
+ */
+function renderHistoryBody() {
+  const box = $('histBody');
+  if (!box) return;
+
+  // 原始数据为空 → 维持原有的空态提示
+  if (!histRawItems || histRawItems.length === 0) {
+    box.innerHTML = '<div class="hist-empty">还没有检测记录，去上面检测一个网址试试～</div>';
+    return;
+  }
+
+  const shown = E.applyFilterTags(histRawItems, filterTags, 'history');
+
+  // 无匹配：友好提示，不空白
+  if (shown.length === 0) {
+    box.innerHTML = '<div class="hist-empty">没有符合当前筛选条件的记录</div>';
+    return;
+  }
+
+  // 拼表格：网址 / 结论 / 跳转 / 时间 / 操作（与 loadHistory 保持一致）
+  const rows = shown.map(it => `
+    <tr>
+      <td><span class="u">${escapeHtml(it.originalUrl || '')}</span></td>
+      <td><span class="lv ${it.riskLevel || 'unknown'}">${escapeHtml(it.riskLabel || '未知')}</span></td>
+      <td class="tm">${it.expandHops || 0} 跳</td>
+      <td class="tm">${escapeHtml(it.createdAt || '')}</span>
+      <td class="row-actions">
+        <button class="${isFavUrl(it.originalUrl) ? 'fav-btn on' : 'fav-btn'}" data-url="${escapeHtml(it.originalUrl || '')}" data-label="${escapeHtml(it.riskLabel || '')}" data-final="${escapeHtml(it.finalUrl || '')}" data-created="${escapeHtml(it.createdAt || '')}" onclick="toggleFavoriteFrom(this)" title="${isFavUrl(it.originalUrl) ? '取消收藏' : '收藏'}">${isFavUrl(it.originalUrl) ? '★' : '☆'}</button>
+        <button class="hact" data-url="${escapeHtml(it.originalUrl || '')}" onclick="copyLinkFrom(this)" title="复制链接">复制</button>
+        <button class="hact" data-url="${escapeHtml(it.originalUrl || '')}" onclick="openQrFrom(this)" title="预览二维码">二维码</button>
+        <button class="hact" onclick="reuseHistory('${escapeAttr(it.originalUrl || '')}')">重新查询</button>
+        <button class="hact del" onclick="deleteHistory(${it.id})">删除</button>
+      </td>
+    </tr>`).join('');
+
+  box.innerHTML = `<div class="htable-wrap"><table class="htable">
+    <thead><tr><th>网址</th><th style="width:88px">结论</th><th style="width:56px">跳转</th><th style="width:140px">检测时间</th><th style="width:290px">操作</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+// ============================================================
+// 功能5：AI 风险解读
+// ------------------------------------------------------------
+// 入口有两处（都是渲染时多挂一个按钮，不改原有点击查询行为）：
+//   1. 单条检测报告 —— renderReport 的操作区
+//   2. 批量结果表格 —— renderBatchRows 每行的操作列
+//
+// 按钮只传三个东西：网址、风险等级、风险线索清单。
+// 后端 AI 接口的调用与降级全在 engine.fetchInterpret 里，
+// 本节只负责：开弹窗 → 显示加载态 → 调引擎 → 渲染结果/错误。
+// ============================================================
+
+// 当前正在解读的按钮，用于锁定防重复点击
+let aiPendingBtn = null;
+
+// ---------- 弹窗开合 ----------
+function openAiModal() {
+  $('aiModal').classList.add('on');
+}
+function closeAiModal() {
+  $('aiModal').classList.remove('on');
+  // 关闭时解锁按钮，允许下次重新发起
+  unlockAiBtn();
+}
+
+// ================= 工具简介弹窗 =================
+function openAboutModal() {
+  $('aboutModal').classList.add('on');
+}
+function closeAboutModal() {
+  $('aboutModal').classList.remove('on');
+}
+// 点击遮罩关闭
+$('aboutModal').addEventListener('click', function (e) {
+  if (e.target === this) closeAboutModal();
+});
+// 点击遮罩区域（弹窗外的深色背景）关闭
+// 注意要判断事件目标是遮罩本身，避免点击弹窗内容时误关
+$('aiModal').addEventListener('click', function (e) {
+  if (e.target === this) closeAiModal();
+});
+// Esc 关闭
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') {
+    if ($('aiModal').classList.contains('on')) closeAiModal();
+    if ($('qrModal').classList.contains('on')) closeQrModal();
+    if ($('tplModal').classList.contains('on')) closeTplModal();
+    if ($('aboutModal').classList.contains('on')) closeAboutModal();
+  }
+});
+
+// ---------- 按钮锁定 ----------
+function lockAiBtn(btn) {
+  aiPendingBtn = btn;
+  if (!btn) return;
+  btn.disabled = true;
+  btn.classList.add('loading');
+  btn.textContent = '⏳ 解读中';
+}
+function unlockAiBtn() {
+  if (!aiPendingBtn) return;
+  aiPendingBtn.disabled = false;
+  aiPendingBtn.classList.remove('loading');
+  aiPendingBtn.textContent = '🤖 AI解读';
+  aiPendingBtn = null;
+}
+
+// ---------- 渲染弹窗内容 ----------
+function renderAiLoading(url, level, label) {
+  $('aiTitle').textContent = '🤖 AI 风险解读';
+  $('aiBody').innerHTML =
+    `<div class="ai-sum">
+      <span class="u">${escapeHtml(url)}</span>
+      <span class="m">检测结论：${escapeHtml(label || '未知')}</span>
+    </div>
+    <div class="ai-load"><span class="bt-spin"></span><span>正在生成 AI 解读，请稍候…</span></div>`;
+}
+
+// 出错时在弹窗内展示，不影响页面其他内容
+function renderAiError(url, label, msg) {
+  $('aiTitle').textContent = '⚠️ AI 解读失败';
+  $('aiBody').innerHTML =
+    `<div class="ai-sum">
+      <span class="u">${escapeHtml(url)}</span>
+      <span class="m">检测结论：${escapeHtml(label || '未知')}</span>
+    </div>
+    <div class="ai-err">
+      <span class="wt">解读服务暂时无法使用</span>
+      ${escapeHtml(msg || '未知错误')}
+      <br><br>
+      你可以稍后重试，或直接参考检测报告中的「风险线索清单」和「访问操作建议」两节。
+    </div>`;
+}
+
+// 成功渲染：四段内容 + 来源标注
+function renderAiResult(url, level, label, content, source) {
+  // 按固定的四段顺序渲染，缺哪段就不显示，不填占位符
+  const secs = E.toInterpretSections(content);
+  if (secs.length === 0) {
+    renderAiError(url, label, 'AI 返回的内容为空，请稍后重试');
+    return;
+  }
+
+  // 每段加一个 s-xxx 类，用于左侧竖条取不同状态色
+  const clsMap = {
+    type: 's-risk', method: 's-method', harm: 's-harm', protect: 's-protect'
+  };
+
+  $('aiTitle').textContent = '🤖 AI 风险解读';
+  $('aiBody').innerHTML =
+    `<div class="ai-sum">
+      <span class="u">${escapeHtml(url)}</span>
+      <span class="m">检测结论：${escapeHtml(label || '未知')}</span>
+    </div>
+    <div class="ai-body">
+      ${secs.map(s => `
+        <div class="ai-sec ${clsMap[s.key] || ''}">
+          <div class="t">${s.icon} ${escapeHtml(s.title)}</div>
+          <p class="c">${escapeHtml(s.text)}</p>
+        </div>`).join('')}
+      <div class="ai-foot">
+        ${source === 'ai'
+          ? '内容由 AI 大模型基于本链接的检测结果生成，仅供参考。'
+          : '内容由网址慧眼依据检测规则离线生成（AI 接口未接入时自动使用本模式）。'}
+        <br>检测结论与风险评级由后端判定，本页不会修改评级。
+      </div>
+    </div>`;
+}
+
+/**
+ * 发起 AI 解读。
+ *
+ * @param {string} url 网址
+ * @param {string} level 风险等级 safe/suspicious/danger/unknown
+ * @param {string} label 风险结论文字
+ * @param {Array} risks 风险线索清单
+ * @param {HTMLElement} btn 触发按钮，用于锁定
+ */
+async function requestAiInterpret(url, level, label, risks, btn) {
+  // 没有网址，直接提示，不发请求
+  if (!url) {
+    alert('暂无风险结果，无法生成AI解读');
+    return;
+  }
+
+  // 没有风险结论数据时直接提示，不发起请求（需求第4条）
+  // 注意：unknown 也是有效的风险结论（表示"检测不出"），只有完全没有结论才算无数据
+  if (!level && !label) {
+    alert('暂无风险结果，无法生成AI解读');
+    return;
+  }
+
+  // 已在解读中，忽略重复点击
+  if (aiPendingBtn) return;
+
+  // 引擎守卫
+  if (!window.WZH || typeof E.fetchInterpret !== 'function') {
+    alert('脚本未正确加载，请按 Ctrl+F5 强制刷新页面');
+    return;
+  }
+
+  const lv = level || 'unknown';
+  const lb = label || (E.LEVEL_TEXT ? E.LEVEL_TEXT[lv] : '未知');
+
+  // 开弹窗 + 加载态 + 锁定按钮
+  renderAiLoading(url, lv, lb);
+  openAiModal();
+  lockAiBtn(btn);
+
+  try {
+    const res = await E.fetchInterpret(url, lv, lb, risks);
+
+    if (res && res.ok) {
+      renderAiResult(url, lv, lb, res.data, res.source);
+    } else {
+      // 接口明确返回失败（不是网络不通），如实告诉用户
+      renderAiError(url, lb, (res && res.msg) || 'AI 解读服务返回异常');
+    }
+  } catch (e) {
+    // 引擎内部已做降级，走到这里说明是意料外的异常，兜住不让页面崩
+    renderAiError(url, lb, '请求过程中出现异常：' + (e.message || e));
+  } finally {
+    // 无论成败都解锁按钮
+    unlockAiBtn();
+  }
+}
+
+// ---------- 两个入口的便捷包装 ----------
+// 单条检测报告用：风险线索来自 d.risks
+function aiInterpretFromReport(input, level, label, risks, btn) {
+  return requestAiInterpret(input, level, label, risks, btn);
+}
+// 从按钮的 data-* 属性读取数据后发起解读。
+// 单条报告的按钮用这个，避免把含引号的风险线索 JSON 拼进 onclick 字符串。
+function aiInterpretFromAttr(btn) {
+  if (!btn) return;
+  const url = btn.getAttribute('data-url') || '';
+  const level = btn.getAttribute('data-level') || '';
+  const label = btn.getAttribute('data-label') || '';
+  // JSON 解析失败时降级为空数组，不让一条脏数据卡住整个按钮
+  let risks = [];
+  try {
+    risks = JSON.parse(btn.getAttribute('data-risks') || '[]');
+  } catch (e) {
+    risks = [];
+  }
+  return requestAiInterpret(url, level, label, risks, btn);
+}
+// 批量表格行用：字段名是 r.url / r.level / r.label / r.note
+function aiInterpretFromRow(r, btn) {
+  const url = r && r.url ? r.url : '';
+  // 批量行的 note 也是有用的补充信息，一并作为线索传给后端
+  const risks = [];
+  if (r && r.note) risks.push(r.note);
+  if (r && r.hops) risks.push('跳转层数：' + r.hops + ' 跳');
+  return requestAiInterpret(url, r ? r.level : '', r ? r.label : '', risks, btn);
+}
+
+// ============================================================
+// 功能7：快捷复制 + 二维码预览
+// ------------------------------------------------------------
+// 复制链接、二维码本地生成都是**纯前端**，不调任何后端接口。
+// 二维码矩阵由 engine.buildQrMatrix 产出，这里只负责画到 canvas。
+// ============================================================
+
+// ---------- 复制链接 ----------
+// 成功/失败都用已有的轻量浮层 showExpTip 提示。
+async function copyLink(text) {
+  if (!text) { showExpTip('复制失败，请手动选中', 'err', 2600); return; }
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      showExpTip('复制成功', 'ok', 1800);
+    } else {
+      // 非安全上下文 / 旧浏览器降级：textarea + execCommand('copy')
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      showExpTip(ok ? '复制成功' : '复制失败，请手动选中', ok ? 'ok' : 'err', ok ? 1800 : 2600);
+    }
+  } catch (e) {
+    showExpTip('复制失败，请手动选中', 'err', 2600);
+  }
+}
+
+// ============================================================
+// 网址可点击跳转（点击文字 → 新标签页打开）
+// ------------------------------------------------------------
+// 统一规则：**网址文字点击跳转，复制走独立按钮**，两者互不干扰。
+//   - 跳转：target="_blank" + rel="noopener noreferrer"，
+//           新标签页打开，不会覆盖当前页面（保住用户的查询记录）
+//   - 缺协议自动补全（跳转链路里的 URL 常是裸域名）
+// 统一用 rel 隔离，避免目标页面通过 window.opener 反向操纵本页
+// ============================================================
+
+/**
+ * 补全协议：裸域名（y.qq.com）自动补 https://，已有协议原样返回。
+ * 非 http/https 的协议（如 javascript:）一律拒绝，防止注入。
+ */
+function normalizeLinkUrl(raw) {
+  let u = String(raw || '').trim();
+  if (!u) return '';
+  if (/^https?:\/\//i.test(u)) return u;
+  // 其它协议（javascript: / data: / vbscript:）直接拒绝
+  if (/^[a-z][a-z0-9+.-]*:/i.test(u)) return '';
+  return 'https://' + u.replace(/^\/+/, '');
+}
+
+/**
+ * 渲染一个可点击跳转的网址文字。
+ * @param {string} raw   原始网址（可缺协议）
+ * @param {boolean} allowJump 高危站点传 false → 只显示纯文本，不给跳转
+ */
+function renderClickableUrl(raw, allowJump) {
+  const safe = escapeHtml(String(raw || ''));
+  const url = normalizeLinkUrl(raw);
+  if (!url) return `<span class="url-text">${safe}</span>`;
+  if (allowJump === false) {
+    // 高危链接不给一键跳转（安全设计），只显示文字
+    return `<span class="url-text">${safe}</span>`;
+  }
+  return `<a class="url-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="在新标签页打开 ${safe}">${safe}</a>`;
+}
+// 从按钮 data-url 属性取原始网址（避免把网址拼进 onclick 字符串）
+function copyLinkFrom(btn) {
+  copyLink(btn ? btn.getAttribute('data-url') : '');
+}
+
+// ---------- 二维码预览 ----------
+function openQrFrom(btn) {
+  openQrModal(btn ? btn.getAttribute('data-url') : '');
+}
+function openQrModal(url) {
+  if (!url) { showExpTip('链接为空，无法生成二维码', 'err', 2600); return; }
+  // 引擎本地生成矩阵（纯前端，无后端依赖）
+  const r = E.buildQrMatrix(url);
+  if (!r || !r.ok) {
+    showExpTip((r && r.msg) || '二维码生成失败', 'err', 3200);
+    return;
+  }
+  // 画到 canvas：白底 + 黑块（QR 扫描要求浅底，不随主题变化）
+  const canvas = $('qrCanvas');
+  const quiet = 4;                                              // 静区 4 模块
+  const scale = Math.max(2, Math.floor(280 / (r.size + quiet * 2)));  // 长网址自适应边长
+  const px = (r.size + quiet * 2) * scale;
+  canvas.width = px;
+  canvas.height = px;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, px, px);
+  ctx.fillStyle = '#000';
+  for (let i = 0; i < r.size; i++) {
+    for (let j = 0; j < r.size; j++) {
+      if (r.matrix[i][j]) ctx.fillRect((j + quiet) * scale, (i + quiet) * scale, scale, scale);
+    }
+  }
+  $('qrUrl').textContent = url;
+  $('qrModal').classList.add('on');
+}
+function closeQrModal() {
+  $('qrModal').classList.remove('on');
+}
+// 点击遮罩（弹窗外的深色背景）关闭
+$('qrModal').addEventListener('click', function (e) {
+  if (e.target === this) closeQrModal();
+});
+
+// ============================================================
+// 功能8：风险统计看板
+// ------------------------------------------------------------
+// 一行 5 张卡片（总计 / 安全 / 可疑 / 高危 / 未知），
+// 数据源可在「批量结果」与「全部历史记录」间切换。
+// 卡片可点击 → 联动选中对应筛选标签；总计卡片 → 清空筛选。
+// 统计是纯前端本地计算，不新增后端接口。
+// ============================================================
+
+let dashSource = 'batch';         // 当前看板数据源：'batch' | 'history'
+let dashHistCache = null;         // 历史模式缓存的全量数据（复用已有 fetchAllHistory 拉取）
+
+// 获取看板当前数据源（套用当前筛选后的子集）
+function getDashRows() {
+  const area = dashSource === 'batch' ? 'batch' : 'history';
+  const raw = dashSource === 'batch' ? (lastBatchRows || []) : (dashHistCache || []);
+  // 套用当前筛选标签，让看板数字随筛选实时变化
+  return E.applyFilterTags(raw, filterTags, area);
+}
+
+// 统计各风险等级数量
+function computeDashStats(rows) {
+  const s = { total: rows.length, safe: 0, suspicious: 0, danger: 0, unknown: 0 };
+  for (let i = 0; i < rows.length; i++) {
+    // 批量行用 level，历史行用 riskLevel，兼容两种字段
+    const lv = rows[i].level || rows[i].riskLevel || 'unknown';
+    if (s[lv] !== undefined) s[lv]++; else s.unknown++;
+  }
+  return s;
+}
+
+// 渲染看板（纯本地计算，不发请求）
+function renderDash() {
+  const cards = $('dashCards');
+  if (!cards) return;
+  const area = dashSource === 'batch' ? 'batch' : 'history';
+  const raw = dashSource === 'batch' ? (lastBatchRows || []) : (dashHistCache || []);
+  const isEmpty = raw.length === 0;                          // 原始数据为空 → 显示 "--"
+  const filtered = E.applyFilterTags(raw, filterTags, area);
+  const stats = computeDashStats(filtered);
+
+  const defs = [
+    { key: 'total',      label: '总计', color: 'total',      tag: null },
+    { key: 'safe',       label: '安全', color: 'safe',       tag: 'safe' },
+    { key: 'suspicious', label: '可疑', color: 'suspicious', tag: 'suspicious' },
+    { key: 'danger',     label: '高危', color: 'danger',     tag: 'danger' },
+    { key: 'unknown',    label: '未知', color: 'unknown',    tag: 'unknown' }
+  ];
+
+  cards.innerHTML = defs.map(function (d) {
+    const n = isEmpty ? '--' : stats[d.key];
+    // 对应筛选标签被选中时，卡片高亮；总计卡片在无筛选时高亮
+    const isOn = d.tag ? filterTags.indexOf(d.tag) >= 0 : filterTags.length === 0;
+    const cls = ['dcard', 'c-' + d.color, isOn ? 'on' : '', isEmpty ? 'empty' : '']
+      .filter(Boolean).join(' ');
+    const click = d.tag
+      ? "dashClickCard('" + d.tag + "','" + area + "')"
+      : "dashClickTotal('" + area + "')";
+    return '<button class="' + cls + '" onclick="' + click + '">'
+      + '<span class="dc-label">' + d.label + '</span>'
+      + '<span class="dc-num">' + n + '</span>'
+      + '</button>';
+  }).join('');
+
+  // 数据源按钮选中态
+  const sb = $('dashSrcBatch'), sh = $('dashSrcHist');
+  if (sb) sb.classList.toggle('on', dashSource === 'batch');
+  if (sh) sh.classList.toggle('on', dashSource === 'history');
+}
+
+// 切换数据源
+async function setDashSource(src) {
+  dashSource = src;
+  if (src === 'history') {
+    // 历史模式需要全量数据；fetchAllHistory 是功能4已有的函数，循环翻页拉全量
+    try {
+      dashHistCache = await fetchAllHistory();
+    } catch (e) {
+      dashHistCache = [];
+    }
+  }
+  renderDash();
+}
+
+// 点击风险卡片 → 切换对应筛选标签（toggleFilterTag 内部会调 refreshFilterViews → refreshDash）
+function dashClickCard(tag, area) {
+  toggleFilterTag(tag, area);
+}
+
+// 点击总计卡片 → 清空筛选（回到全量视图）
+function dashClickTotal(area) {
+  if (filterTags.length > 0) clearFilterTags(area);
+}
+
+// 刷新看板（由 refreshFilterViews / batchDetect 调用）
+function refreshDash() {
+  renderDash();
+}
+
+// 历史模式：重新拉取全量数据并刷新看板（由 loadHistory 完成后触发）
+async function refreshDashHistory() {
+  try {
+    dashHistCache = await fetchAllHistory();
+  } catch (e) {
+    dashHistCache = dashHistCache || [];
+  }
+  renderDash();
+}
+
+// ============================================================
+// 功能9：本地收藏（localStorage，纯前端）
+// ------------------------------------------------------------
+// 收藏项结构：{ originalUrl, riskLabel, finalUrl, createdAt }
+// 按 originalUrl 去重；刷新页面不丢失（存 localStorage）。
+// 收藏面板复用标签筛选、导出、复制、二维码、AI解读。
+// ============================================================
+
+let favCache = null;   // 内存缓存，避免频繁读 localStorage
+
+// 读收藏列表（带 JSON 容错）
+function getFavorites() {
+  if (favCache) return favCache;
+  try {
+    const raw = localStorage.getItem(E.FAVORITES_KEY);
+    favCache = raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    favCache = [];
+  }
+  if (!Array.isArray(favCache)) favCache = [];
+  return favCache;
+}
+// 写收藏列表（同时更新内存缓存与 localStorage）
+function saveFavorites(list) {
+  favCache = Array.isArray(list) ? list : [];
+  try { localStorage.setItem(E.FAVORITES_KEY, JSON.stringify(favCache)); }
+  catch (e) { /* localStorage 不可用（隐私模式等）时静默降级，仅本次会话有效 */ }
+}
+// 收藏（去重）
+function addFavorite(item) {
+  const url = item && item.originalUrl;
+  if (!url) return false;
+  const list = getFavorites();
+  if (E.isFavorited(list, url)) return false;   // 已收藏，不重复
+  list.push({
+    originalUrl: url,
+    riskLabel: (item.riskLabel || item.label || '未知'),
+    finalUrl: (item.finalUrl || ''),
+    createdAt: (item.createdAt || '')
+  });
+  saveFavorites(list);
+  return true;
+}
+// 取消收藏（按 originalUrl）
+function removeFavoriteByUrl(url) {
+  if (!url) return;
+  saveFavorites(E.removeFavorite(getFavorites(), url));
+}
+// 是否已收藏
+function isFavUrl(url) {
+  return E.isFavorited(getFavorites(), url);
+}
+// 更新收藏数角标 + 收藏面板总数
+function refreshFavCount() {
+  const n = getFavorites().length;
+  const c = $('favCnt'); if (c) c.textContent = n;
+  const t = $('favTotal'); if (t) t.textContent = n ? '共 ' + n + ' 条' : '';
+}
+
+// 数据面板切换（历史 / 收藏）
+function switchDataTab(tab) {
+  const isFav = tab === 'favorites';
+  $('tabHistory').classList.toggle('on', !isFav);
+  $('tabFav').classList.toggle('on', isFav);
+  $('panelHistory').style.display = isFav ? 'none' : '';
+  $('panelFavorites').style.display = isFav ? '' : 'none';
+  if (isFav) {
+    renderFavFilterBar();
+    renderFavorites();
+    refreshFavCount();
+  }
+}
+
+// 收藏筛选栏（复用功能6 标签体系）
+function renderFavFilterBar() {
+  const bar = $('favFilterBar');
+  if (!bar) return;
+  // 收藏项字段对齐历史（originalUrl/riskLabel/riskLevel），
+  // 复用 buildFilterBarHtml('history')；它内部读 histRawItems，
+  // 这里临时把 histRawItems 换成收藏视图生成后再还原（同步调用，安全）。
+  const views = getFavorites().map(function (it) { return E.favoriteView(it); });
+  const saved = histRawItems;
+  histRawItems = views;
+  let html = buildFilterBarHtml('history');
+  histRawItems = saved;
+  // 把标签 onclick 里的 area 从 'history' 换成 'favorites'，
+  // 使点击标签/清空时刷新收藏视图而非历史视图（buildFilterBarHtml 未改动）。
+  html = html.split("'history'").join("'favorites'").split('"history"').join('"favorites"');
+  bar.outerHTML = html;
+}
+
+// 渲染收藏列表
+function renderFavorites() {
+  const box = $('favBody');
+  if (!box) return;
+  const raw = getFavorites();
+  refreshFavCount();
+
+  if (raw.length === 0) {
+    box.innerHTML = '<div class="hist-empty">还没有收藏任何网址<br><span style="font-size:12px">在批量结果或历史记录里点 ☆ 即可收藏</span></div>';
+    return;
+  }
+  // 转成可筛选/导出的视图对象，套用当前筛选
+  const views = raw.map(function (it) { return E.favoriteView(it); });
+  const shown = E.applyFilterTags(views, filterTags, 'history');
+
+  if (shown.length === 0) {
+    box.innerHTML = '<div class="hist-empty">没有符合当前筛选条件的记录</div>';
+    return;
+  }
+
+  const rows = shown.map(function (it) {
+    return `
+      <tr>
+        <td><span class="u">${escapeHtml(it.originalUrl || '')}</span></td>
+        <td><span class="lv ${it.riskLevel || 'unknown'}">${escapeHtml(it.riskLabel || '未知')}</span></td>
+        <td class="tm">${escapeHtml(it.createdAt || '')}</td>
+        <td class="row-actions">
+          <button class="fav-btn on" onclick="unfavFromPanel('${escapeAttr(it.originalUrl)}')" title="取消收藏">★</button>
+          <button class="hact" data-url="${escapeHtml(it.originalUrl)}" onclick="copyLinkFrom(this)" title="复制链接">复制</button>
+          <button class="hact" data-url="${escapeHtml(it.originalUrl)}" onclick="openQrFrom(this)" title="预览二维码">二维码</button>
+          <button class="hact" data-url="${escapeHtml(it.originalUrl)}" data-level="${escapeHtml(it.riskLevel)}" data-label="${escapeHtml(it.riskLabel)}" data-risks="[]" onclick="aiInterpretFromAttr(this)">🤖 AI解读</button>
+          <button class="hact" onclick="reuseHistory('${escapeAttr(it.originalUrl)}')">重新检测</button>
+        </td>
+      </tr>`;
+  }).join('');
+
+  box.innerHTML = `<div class="htable-wrap"><table class="htable">
+    <thead><tr><th>网址</th><th style="width:88px">结论</th><th style="width:150px">收藏时间</th><th style="width:290px">操作</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+// 收藏面板里取消收藏
+function unfavFromPanel(url) {
+  removeFavoriteByUrl(url);
+  renderFavorites();
+  // 同步历史/批量表格里的星标状态
+  renderHistoryBody();
+  rerenderBatchTable();
+  refreshFavCount();
+}
+
+// 一键清空收藏
+function clearFavorites() {
+  const n = getFavorites().length;
+  if (!n) { showExpTip('还没有收藏任何网址', 'warn', 2200); return; }
+  if (!confirm('确定要清空全部 ' + n + ' 条收藏吗？此操作不可恢复！')) return;
+  saveFavorites([]);
+  renderFavorites();
+  renderHistoryBody();
+  rerenderBatchTable();
+  refreshFavCount();
+  showExpTip('已清空收藏', 'ok', 1800);
+}
+
+// 星标按钮：批量/历史行点击收藏（切换）
+function toggleFavorite(url, riskLabel, finalUrl, createdAt) {
+  if (!url) return;
+  if (isFavUrl(url)) {
+    removeFavoriteByUrl(url);
+    showExpTip('已取消收藏', 'ok', 1600);
+  } else {
+    addFavorite({ originalUrl: url, riskLabel: riskLabel, finalUrl: finalUrl, createdAt: createdAt });
+    showExpTip('已收藏', 'ok', 1600);
+  }
+  // 同步所有相关视图的星标状态
+  renderHistoryBody();
+  rerenderBatchTable();
+  renderFavorites();
+  refreshFavCount();
+}
+
+// 生成星标按钮 HTML（批量行 / 历史行共用）
+function favBtnHtml(url, extraLabel) {
+  const faved = isFavUrl(url);
+  const cls = faved ? 'fav-btn on' : 'fav-btn';
+  const star = faved ? '★' : '☆';
+  // 用 data-* 属性传递收藏所需信息，避免拼进 onclick 长字符串
+  const attrs = extraLabel || '';
+  return `<button class="${cls}" data-url="${escapeHtml(url)}" ${attrs} onclick="toggleFavoriteFrom(this)" title="${faved ? '取消收藏' : '收藏'}">${star}</button>`;
+}
+// 从按钮 data-* 读取信息并收藏
+function toggleFavoriteFrom(btn) {
+  const url = btn.getAttribute('data-url') || '';
+  const label = btn.getAttribute('data-label') || '';
+  const finalUrl = btn.getAttribute('data-final') || '';
+  const createdAt = btn.getAttribute('data-created') || '';
+  toggleFavorite(url, label, finalUrl, createdAt);
+}
+
+// ============================================================
+// 功能10：自定义网址预设模板
+// ------------------------------------------------------------
+// 内置样例模板（锁定）+ 自定义模板（localStorage），
+// 点击模板填入输入框；多选模板一键批量填入；管理弹窗增删改。
+// ============================================================
+
+// 内置模板（锁定，不可编辑删除）。与原先硬编码的样例标签一一对应。
+const BUILTIN_TEMPLATES = [
+  { id: 'b1', name: '样例1 · 形近钓鱼站(高危)', url: 'http://0k.cn-security-check.top/login' },
+  { id: 'b2', name: '样例1b · 短链中转(可疑)', url: 'https://account-verify.demo-login.top/signin' },
+  { id: 'b3', name: '样例2 · 正常站点(安全)', url: 'https://demo-notebook.org/' },
+  { id: 'b4', name: '样例 · 循环跳转', url: 'https://loop.demo-redirect.top/' },
+  { id: 'b5', name: '样例 · 无法访问(未知)', url: 'https://unreachable.demo-site.top/' },
+  { id: 'b6', name: '需求 · 流程图', url: '我想找免费画流程图的网站' },
+  { id: 'b7', name: '需求 · 压缩工具', url: '推荐在线图片压缩工具 无广告' },
+  { id: 'b8', name: '需求 · 二维码', url: '哪里有生成二维码的在线工具' },
+  { id: 'b9', name: '需求 · 违禁拦截', url: '我想找翻墙工具' }
+];
+
+// 读自定义模板（localStorage）
+function getCustomTemplates() {
+  try {
+    const raw = localStorage.getItem(E.TEMPLATES_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    return [];
+  }
+}
+// 写自定义模板
+function saveCustomTemplates(list) {
+  try { localStorage.setItem(E.TEMPLATES_KEY, JSON.stringify(list)); }
+  catch (e) { /* localStorage 不可用时静默降级 */ }
+}
+
+// 渲染模板 chips（内置 + 自定义 + 管理按钮）
+function renderTemplates() {
+  const box = $('chips');
+  if (!box) return;
+  const custom = getCustomTemplates();
+  const all = BUILTIN_TEMPLATES.map(function (t) { return Object.assign({}, t, { builtin: true }); })
+    .concat(custom.map(function (t) { return Object.assign({}, t, { builtin: false }); }));
+
+  const chipsHtml = all.map(function (t) {
+    // 内置模板带 🔒 前缀提示锁定；自定义模板无
+    const label = (t.builtin ? '' : '📌 ') + t.name;
+    const cls = t.builtin ? 'chip' : 'chip chip-custom';
+    const title = t.builtin ? '内置模板（锁定）' : '自定义模板';
+    return '<span class="' + cls + '" data-v="' + escapeAttr(t.url) + '" data-builtin="' + (t.builtin ? '1' : '0') + '" title="' + escapeAttr(title) + '">' + escapeHtml(label) + '</span>';
+  }).join('');
+
+  box.innerHTML = chipsHtml + '<button class="chip chip-manage" onclick="openTplModal()" title="增删改自定义模板">⚙️ 管理模板</button>';
+
+  // 绑定点击：内置样例点击 = 填入 + 直接检测（保持原行为）；自定义模板点击 = 仅填入
+  box.querySelectorAll('.chip[data-v]').forEach(function (c) {
+    c.onclick = function () {
+      $('ta').value = c.dataset.v;
+      if (c.dataset.builtin === '1') run();   // 内置样例沿用「点击即检测」
+    };
+  });
+}
+
+// ---------- 模板管理弹窗 ----------
+let editingTplId = null;   // 正在编辑的模板 id（null = 新增）
+
+function openTplModal() {
+  renderTplList();
+  hideTplForm();
+  $('tplModal').classList.add('on');
+}
+function closeTplModal() {
+  $('tplModal').classList.remove('on');
+  hideTplForm();
+}
+$('tplModal').addEventListener('click', function (e) {
+  if (e.target === this) closeTplModal();
+});
+function showTplForm(id) {
+  editingTplId = id || null;
+  $('tplName').value = '';
+  $('tplUrl').value = '';
+  if (editingTplId) {
+    const t = getCustomTemplates().find(function (x) { return x.id === editingTplId; });
+    if (t) { $('tplName').value = t.name; $('tplUrl').value = t.url; }
+  }
+  $('tplForm').style.display = '';
+  $('tplName').focus();
+}
+function hideTplForm() {
+  $('tplForm').style.display = 'none';
+  editingTplId = null;
+}
+function cancelTplForm() { hideTplForm(); }
+function saveTplForm() {
+  const name = $('tplName').value.trim();
+  const url = $('tplUrl').value.trim();
+  if (!name) { showExpTip('请填写模板名称', 'warn', 2000); return; }
+  if (!url) { showExpTip('请填写网址', 'warn', 2000); return; }
+  const list = getCustomTemplates();
+  if (editingTplId) {
+    const i = list.findIndex(function (x) { return x.id === editingTplId; });
+    if (i >= 0) { list[i].name = name; list[i].url = url; }
+    showExpTip('模板已更新', 'ok', 1600);
+  } else {
+    if (list.some(function (x) { return x.url === url; })) { showExpTip('该网址已存在同名模板', 'warn', 2000); return; }
+    list.push({ id: 'tpl_' + Date.now(), name: name, url: url });
+    showExpTip('模板已新增', 'ok', 1600);
+  }
+  saveCustomTemplates(list);
+  hideTplForm();
+  renderTplList();
+  renderTemplates();
+}
+function editTpl(id) { showTplForm(id); }
+function deleteTpl(id) {
+  if (!confirm('确定删除该自定义模板吗？')) return;
+  saveCustomTemplates(getCustomTemplates().filter(function (x) { return x.id !== id; }));
+  renderTplList();
+  renderTemplates();
+}
+function renderTplList() {
+  const box = $('tplList');
+  if (!box) return;
+  const custom = getCustomTemplates();
+  const all = BUILTIN_TEMPLATES.map(function (t) { return Object.assign({}, t, { builtin: true }); })
+    .concat(custom.map(function (t) { return Object.assign({}, t, { builtin: false }); }));
+
+  if (all.length === 0) {
+    box.innerHTML = '<div class="hist-empty">还没有模板</div>';
+    return;
+  }
+  box.innerHTML = all.map(function (t) {
+    const lock = t.builtin ? ' <span class="tpl-lock">🔒 内置</span>' : '';
+    const actions = t.builtin
+      ? ''
+      : '<button class="hact" onclick="editTpl(\'' + t.id + '\')">编辑</button>'
+        + '<button class="hact del" onclick="deleteTpl(\'' + t.id + '\')">删除</button>';
+    return '<div class="tpl-item">'
+      + '<input type="checkbox" class="tpl-chk" data-url="' + escapeAttr(t.url) + '">'
+      + '<div class="tpl-meta">'
+      +   '<div class="tpl-name">' + escapeHtml(t.name) + lock + '</div>'
+      +   '<div class="tpl-url">' + escapeHtml(t.url) + '</div>'
+      + '</div>'
+      + actions
+      + '</div>';
+  }).join('');
+}
+// 多选模板一键批量填入
+function fillSelectedTpls() {
+  const checked = Array.from($('tplList').querySelectorAll('.tpl-chk:checked'));
+  if (!checked.length) { showExpTip('请先勾选要批量填入的模板', 'warn', 2200); return; }
+  const urls = checked.map(function (c) { return c.dataset.url; });
+  $('ta').value = urls.join('\n');
+  closeTplModal();
+  showExpTip('已填入 ' + urls.length + ' 个网址到输入区，可点「批量检测」', 'ok', 2600);
+}
+
+// 绑定按钮
+$('histRefresh').onclick = () => loadHistory(histPage);
+$('histClear').onclick = clearHistory;
+$('histPrev').onclick = () => loadHistory(histPage - 1);
+$('histNext').onclick = () => loadHistory(histPage + 1);
+
+// 页面加载时自动读取一次历史记录
+loadHistory(1);
+// 功能8：初始化统计看板（批量模式，此时无批量数据，卡片显示 "--"）
+renderDash();
+// 功能9：初始化收藏角标
+refreshFavCount();
+// 功能10：初始化模板标签（内置样例 + 自定义模板 + 管理按钮）
+renderTemplates();
+
+async function run() {
+  // 引擎没加载成功时的守卫：给出明确提示而不是静默失败
+  if (!window.WZH || typeof E.routeInput !== 'function') {
+    alert('脚本未正确加载，请按 Ctrl+F5 强制刷新页面');
+    return;
+  }
+  const raw = $('ta').value.trim();
+  if (!raw) return;
+  $('ta').value = '';
+
+  const r = E.routeInput(raw);
+
+  if (r.type === 'garbage') {
+    add(`<h3>💬 我能帮你什么</h3><div class="warn warn-neutral"><span class="wt">请选择功能</span>${E.GARBAGE_TEXT || '我支持两个功能：①给我链接帮你检测风险；②描述你的需求，我帮你查找靠谱网站。'}</div>`);
+    return;
+  }
+  if (r.type === 'conflict') {
+    // 注意：两个值都走 data-* 属性 + escapeHtml，不拼进 onclick 字符串——
+    // 网址里带单引号时（如 https://a'b.com）会把 onclick 的 JS 字符串截断，按钮点击直接报错
+    add(`<h3>❓ 请确认你的意图</h3><p>你发送的内容里同时包含<b>网址</b>和<b>文字需求</b>：</p><div class="warn warn-warning"><span class="wt">需要你选择</span>请问你想要 <b>【检测这条链接安全】</b>，还是 <b>【根据你的文字需求推荐网站】</b>？</div><div class="actions"><button class="abtn" data-url="${escapeHtml(r.urls[0] || '')}" onclick="fillTaFrom(this)">① 检测这条链接</button><button class="abtn" data-text="${escapeHtml(raw.replace(/https?:\/\/\S+/g,'').trim())}" onclick="fillTaTextFrom(this)">② 按需求推荐网站</button></div>`);
+    return;
+  }
+  if (r.type === 'url') {
+    await detectUI(raw);
+    // 功能1：检测成功后自动刷新历史列表，新记录立刻出现在面板里
+    loadHistory(1);
+    return;
+  }
+  if (r.type === 'intent') { await recommendUI(raw); return; }
+}
+
+// 冲突分支的两个按钮：从 data-* 属性取值回填输入框。
+// 不把值拼进 onclick 字符串——网址含单引号时会截断 JS 字符串，导致点击报错
+function fillTaFrom(btn) {
+  $('ta').value = btn.getAttribute('data-url') || '';
+}
+function fillTaTextFrom(btn) {
+  $('ta').value = btn.getAttribute('data-text') || '';
+}
+
+// ================= 通道 A：链接检测 =================
+async function detectUI(raw) {
+  // 通道A 现在会联网实时查询域名档案（DNS / RDAP 注册信息 / SSL 证书 / IP 属地），
+// 单个域名可能耗时数秒，先给出等待反馈，避免用户以为页面卡死
+add(`<h3>🔍 正在检测…</h3><div class="warn warn-neutral"><span class="wt">检测中</span>正在查询域名档案信息（DNS 解析、注册信息、SSL 证书、服务器属地），请稍候…</div>`);
+
+  const r = await E.detect(raw, { degrade: MODE });
+
+  // 后端连接失败 / 返回错误码 —— 页面正常展示提示，不卡死
+  if (r.type === 'backendDown') {
+    add(`<h3>⚠️ 后端服务未连接</h3><div class="warn warn-warning"><span class="wt">无法连接检测服务</span>${r.msg}</div>`);
+    return;
+  }
+  if (r.type === 'backendError') {
+    const title = r.code === 429 ? '请求过于频繁（限流）' : r.code === 400 ? '参数错误' : '后端服务异常';
+    add(`<h3>⚠️ 检测失败</h3><div class="warn warn-warning"><span class="wt">${title}（code ${r.code}）</span>${r.msg}</div>`);
+    return;
+  }
+  if (r.type === 'invalid' || r.type === 'limit') {
+    add(`<h3>⚠️ 无法处理</h3><div class="warn warn-warning"><span class="wt">${r.type === 'limit' ? '超过单次上限' : 'URL 语法错误'}</span>${r.msg}</div>`);
+    return;
+  }
+  r.results.forEach(res => {
+    if (res.invalid) {
+      add(`<h3>⚠️ 语法错误</h3><p>提交链接：<code>${res.input}</code></p><div class="warn warn-warning"><span class="wt">识别失败</span>${res.msg}</div>`);
+      return;
+    }
+    add(renderReport(res, raw));
+  });
+}
+
+function renderReport(res, raw) {
+  const d = res.demo, L = res.local;
+  const cls = d.level;
+  const degradeBlock = res.degradeNote
+    ? `<div class="warn warn-warning"><span class="wt">⚠️ 降级运行中</span>${res.degradeNote}</div>` : '';
+
+  const loopWarn = d.loopExceeded
+    ? `<div class="warn warn-warning"><span class="wt">循环跳转告警</span>该链接跳转层数超过上限 5 层，判定为循环跳转，存在较高可疑风险。</div>` : '';
+
+  // 跳转链：每一跳都是 URL，文字可点击在新标签页打开（高危站不给跳转）
+  const chain = d.jumpChain.map((s, i) =>
+    `<div class="step ${i === d.jumpChain.length - 1 ? 'fin' : ''}">${renderClickableUrl(s, cls !== 'danger')}</div>`).join('');
+
+  // 风险清单
+  const riskHtml = d.risks.length
+    ? `<ul class="risks">${d.risks.map(x => `<li>${x}</li>`).join('')}</ul>`
+    : `<ul class="risks clean"><li>✅ 未发现异常风险特征</li></ul>`;
+
+  // 建议
+  let advice;
+  if (cls === 'danger') advice = `<div class="warn warn-caution"><span class="wt">❌ 强烈禁止访问</span>该链接被标记为高危风险站点。<b>不提供一键跳转，仅支持复制链接查看</b>。请立即关闭，不要输入任何个人信息。</div>`;
+  else if (cls === 'suspicious') advice = `<div class="warn warn-warning"><span class="wt">⚠️ 谨慎访问</span>如确需访问，请<b>不要输入手机号、银行卡、验证码、账号密码</b>，不要下载任何文件，不要授权任何权限。</div>`;
+  else if (cls === 'safe') advice = `<div class="warn warn-info"><span class="wt">✅ 可正常浏览</span>未发现明显风险特征。依旧提醒：不要随意向陌生网站提交隐私信息。</div>`;
+  else advice = `<div class="warn warn-neutral"><span class="wt">🤷 无法完成检测</span>缺少足够研判数据，<b>不建议贸然访问</b>。如必须访问，请提高警惕并避免提交任何隐私信息。</div>`;
+
+  const footer = cls === 'danger' ? '' :
+    `<div class="actions">
+      <button class="abtn" onclick="document.getElementById('ta').value='${res.input}'">🔄 重新检测</button>
+      <button class="abtn" onclick="addToWhitelist('${res.input}')">➕ 加入白名单</button>
+      <button class="abtn" onclick="reportMalicious('${res.input}')">🚨 上报为恶意站点</button>
+      <button class="abtn" onclick="document.getElementById('ta').value='推荐同类替代网站'">🔄 查找同类替代网站</button>
+    </div>`;
+
+  // 功能5：AI解读按钮。
+  // 刻意放在 footer 之外，因为高危站(danger)时 footer 为空（不提供任何跳转类操作），
+  // 但 AI 解读是纯读取型的，对高危站恰恰最有价值，不该被那条规则挡掉。
+  //
+  // 数据传递方式：风险线索用 data-risks 属性携带，onclick 里只传 this。
+  // 之前试过把 JSON 直接拼进 onclick，但风险线索里常含双引号
+  // （如 域名片段 "xxx" 含数字字母混合），转义后与 JS 字面量混在一起不可靠。
+  //
+  // ⚠️ 这里必须用 escapeHtml 而不是 escapeAttr：
+  //    escapeAttr 会额外把 \ 变成 \\，而风险线索里的引号本身已经是 JSON 转义符（\"），
+  //    浏览器解码 &quot; 后反斜杠就"翻倍"成了 \\\\，JSON.parse 直接失败，
+  //    表现为所有风险线索静默丢失。escapeHtml 只处理 HTML 特殊字符，正好够用。
+  const aiRisksJson = escapeHtml(JSON.stringify(d.risks || []));
+  // 功能7：复制链接 + 预览二维码，与 AI解读并排（同样是纯读取型，高危站也保留）
+  const cpQrBtns = `<button class="abtn" data-url="${escapeHtml(res.input)}" onclick="copyLinkFrom(this)">🔗 复制链接</button>
+      <button class="abtn" data-url="${escapeHtml(res.input)}" onclick="openQrFrom(this)">📱 预览二维码</button>`;
+  const aiBtn = `<div class="actions" style="border:none;padding-top:11px;margin-top:4px">
+      ${cpQrBtns}
+      <button class="abtn" data-url="${escapeAttr(res.input)}" data-level="${escapeAttr(cls)}" data-label="${escapeAttr(d.label)}" data-risks="${aiRisksJson}" onclick="aiInterpretFromAttr(this)">🤖 AI解读详情</button>
+    </div>`;
+
+  return `
+  <h3>🔍 网址安全检测报告 <span class="tag ${cls}" onclick="showScience('${cls}')">${d.label}</span></h3>
+  <div style="font-size:11.5px;color:var(--text3);margin-top:-6px;margin-bottom:10px">点击风险标签查看对应风险科普解释</div>
+
+  <div style="margin-bottom:6px"><span style="color:var(--text3);font-size:12px">1 · 原始提交链接</span></div>
+  <div class="chain"><div class="step fin">${renderClickableUrl(res.input, cls !== 'danger')} <span style="color:var(--text3);font-size:11px">（点击新标签页打开）</span>${cls === 'danger' ? ' <span style="color:var(--dang-fg);font-size:11px">高危站点不提供跳转</span>' : ''}</div></div>
+  ${cls === 'danger' ? '' : `<div style="margin:-4px 0 11px"><button class="abtn" data-url="${escapeHtml(res.input)}" onclick="copyLinkFrom(this)">🔗 复制链接</button></div>`}
+
+  ${degradeBlock}${loopWarn}
+
+  <div class="hr"></div>
+  <div style="margin-bottom:4px"><span style="color:var(--text3);font-size:12px">2 · 完整跳转链路（短链展开明细）</span></div>
+  <div class="chain">${chain}</div>
+
+  <div class="hr"></div>
+  <div style="margin-bottom:6px"><span style="color:var(--text3);font-size:12px">3 · 安全评级标签</span></div>
+  <div><span class="tag ${cls}" onclick="showScience('${cls}')">${d.label}</span></div>
+
+  <div class="hr"></div>
+  <div style="margin-bottom:6px"><span style="color:var(--text3);font-size:12px">站点用途识别</span></div>
+  <div class="purpose">${escapeHtml((d.sitePurpose || '').replace(/^【站点用途】\s*/, ''))}</div>
+
+  <div class="hr"></div>
+  <div style="margin-bottom:6px"><span style="color:var(--text3);font-size:12px">4 · 域名档案</span>${d.domain.source ? `<span style="color:var(--text3);font-size:11px;margin-left:8px">· ${escapeHtml(d.domain.source)}${d.domain.partial ? '（部分字段查询失败）' : ''}</span>` : ''}</div>
+  <div class="grid">
+    <div class="cell"><div class="k">主域名</div><div class="v">${d.domain.name}</div></div>
+    <div class="cell"><div class="k">注册时间</div><div class="v">${d.domain.regDate}</div></div>
+    <div class="cell"><div class="k">到期时间</div><div class="v">${d.domain.expireDate}</div></div>
+    <div class="cell"><div class="k">注册商</div><div class="v">${d.domain.registrar}</div></div>
+    <div class="cell"><div class="k">服务器 IP</div><div class="v">${d.domain.serverIp}</div></div>
+    <div class="cell"><div class="k">服务器属地</div><div class="v">${d.domain.serverArea}</div></div>
+    <div class="cell"><div class="k">SSL 证书</div><div class="v">${d.ssl}</div></div>
+    <div class="cell"><div class="k">请求协议</div><div class="v">${L && L.parsed ? L.parsed.protocol.replace(':','').toUpperCase() : 'HTTPS'}</div></div>
+  </div>
+  <div class="grid">
+    <div class="cell" style="grid-column:1/-1"><div class="k">ICP 备案信息</div><div class="v">${d.icp.status === '无' ? d.icp.note : '已备案 · ' + d.icp.status}</div></div>
+  </div>
+
+  <div class="hr"></div>
+  <div style="margin-bottom:6px"><span style="color:var(--text3);font-size:12px">5 · 站点说明</span></div>
+  <p>${d.summary}</p>
+
+  <div class="hr"></div>
+  <div style="margin-bottom:6px"><span style="color:var(--text3);font-size:12px">6 · 风险线索清单</span></div>
+  ${riskHtml}
+
+  ${aiBtn}
+
+  <div class="hr"></div>
+  <div style="margin-bottom:6px"><span style="color:var(--text3);font-size:12px">7 · 访问操作建议</span></div>
+  ${advice}
+  ${footer}
+  <div class="disc">${E.DISCLAIMER}</div>`;
+}
+
+function showScience(level) {
+  const map = {
+    safe: 'HTTPS不等于绝对安全：HTTPS仅仅代表传输数据加密，任何人都可以低成本申请证书，钓鱼网站一样可以拥有HTTPS绿色锁标，不能当成安全凭证。同时【安全】评级意味着本次未检出风险特征，不代表网站绝对无风险。',
+    suspicious: '本条链接最常见的风险组合是：【短链钓鱼】短链接会隐藏真实目标地址 + 【新建域名风险】刚注册不久的域名没有长期运营记录 + 【境外服务器风险】国内监管难以覆盖。三者叠加时，诈骗概率显著升高。',
+    danger: '【域名形近混淆钓鱼】骗子使用外形几乎一样的字符仿冒官网，例如把字母o换成数字0、字母l换成数字1，肉眼很容易看错，是最常见的钓鱼手段。同时【HTTPS不等于绝对安全】——钓鱼网站一样有绿色锁标，不能当成安全凭证。'
+  };
+  $('mtext').innerHTML = '💡<b>' + ({ safe: '✅ 安全评级说明', suspicious: '⚠️ 可疑评级说明', danger: '❌ 高危评级说明' }[level]) + '</b><br><br>' + map[level];
+  $('modal').classList.add('on');
+}
+
+// ================= 通道 B：需求推荐 =================
+// 通道B 请求序号：每次提交新需求自增。
+// 用于竞态保护——连续提交时，先发起的旧请求返回得晚，若直接渲染会把
+// 新旧两轮结果叠加在一起。用序号判断"这一轮还是不是最新的一轮"，
+// 过期请求直接丢弃（return，不渲染）。
+let recommendSeq = 0;
+
+async function recommendUI(raw) {
+  // 本轮请求序号：自增后记为"我的轮次"
+  const mySeq = ++recommendSeq;
+
+  // ★ 先清空上一轮的所有输出（检索卡片、执行链路、提示框），再显示加载。
+  //   否则连续提交新需求时，旧卡片会一直堆在下面，新旧结果叠加。
+  $('out').innerHTML = '';
+
+  // 先渲染加载态：通道B 现走后端联网检索（含 DNS/HTTP 实测），
+  // 耗时可达数十秒，必须有明确等待反馈，否则用户以为页面卡死
+  add(`<h3>🔍 正在联网检索站点…</h3><div class="warn warn-neutral"><span class="wt">检索中</span>正在从互联网检索与「${escapeHtml(raw.slice(0, 20))}」匹配的正规站点，并逐个验证域名解析与可访问性，请稍候（最长约 45 秒）…</div>`);
+
+  const r = await E.recommend(raw, { degrade: MODE });
+
+  // ★ 竞态保护：等待期间用户又提交了新需求（序号已前移），
+  //   这轮结果已过期，直接丢弃，绝不渲染，防止新旧结果叠加。
+  if (mySeq !== recommendSeq) return;
+
+  if (r.type === 'backendDown') {
+    add(`<h3>⚠️ 后端服务未连接</h3><div class="warn warn-warning"><span class="wt">无法连接推荐服务</span>${r.msg}</div>`);
+    return;
+  }
+  if (r.type === 'backendError') {
+    const title = r.code === 429 ? '请求过于频繁（限流）' : r.code === 400 ? '参数错误' : '后端服务异常';
+    add(`<h3>⚠️ 推荐失败</h3><div class="warn warn-warning"><span class="wt">${title}（code ${r.code}）</span>${r.msg}</div>`);
+    return;
+  }
+  // ★ 联网检索失败 / 超时：明确提示，绝不给无效链接
+  if (r.type === 'searchFailed') {
+    add(`<h3>⚠️ 联网检索失败</h3><div class="warn warn-warning"><span class="wt">暂时无法推荐站点</span>${r.msg}</div><div class="actions"><button class="abtn" onclick="document.getElementById('ta').focus()">✏️ 重新描述需求</button><button class="abtn" data-last-demand="${escapeHtml(raw)}" onclick="runRecommendAgain(this)">🔄 重试</button></div>`);
+    return;
+  }
+  if (r.type === 'refuse') {
+    const src = r.fromBackend ? '后端与前端双端校验' : '前端内置违禁词库离线执行';
+    add(`<h3>🚫 需求未通过合规校验</h3><div class="warn warn-caution"><span class="wt">已拦截 · 命中违禁类别：${r.category}</span>很抱歉，我无法为你提供该类站点推荐，该需求不符合规范，请更换合法合规需求。</div><div style="font-size:12.5px;color:var(--text3)">（拦截关键词：${r.keyword}　· ${src}）</div>`);
+    return;
+  }
+  if (r.type === 'degrade') {
+    add(`<h3>⚠️ 推荐服务维护中</h3><div class="warn warn-warning"><span class="wt">降级L3 已触发</span>${r.msg}</div>`);
+    return;
+  }
+  if (r.type === 'empty') {
+    add(`<h3>🔍 未找到匹配站点</h3><div class="warn warn-neutral"><span class="wt">检索无结果</span>${r.msg}</div>`);
+    return;
+  }
+
+  const cards = r.sites.map((s, i) => `
+    <div class="site">
+      <div class="st">
+        <div class="sn">🔹 ${escapeHtml(s.name)}</div>
+        <span class="tag ${s.live === '✅ 安全' ? 'safe' : 'suspicious'}">${s.live}</span>
+      </div>
+      <div class="su">${renderClickableUrl(s.url)} <span style="color:var(--text3)">（点击新标签页打开）</span></div>
+      <div class="sd">${escapeHtml(s.desc)} · 适用场景：${escapeHtml(s.scene)}</div>
+      <div class="stags">
+        <span class="mini ${s.free ? 'g' : 'y'}">${s.free ? '免费' : '付费'}</span>
+        <span class="mini ${s.ad ? 'y' : 'g'}">${s.ad ? '有广告' : '无广告'}</span>
+        <span class="mini">历史评级 ${s.history}</span>
+        <span class="mini g">已实时复测</span>
+      </div>
+      <div class="actions" style="border:none;padding-top:11px;margin-top:4px">
+        <button class="abtn" data-url="${escapeHtml(s.url)}" onclick="copyLinkFrom(this)">🔗 复制链接</button>
+        <button class="abtn" data-url="${escapeHtml(s.url)}" onclick="fillTaFrom(this)">查看完整检测报告</button>
+        <button class="abtn" data-name="${escapeHtml(s.name)}" data-url="${escapeHtml(s.url)}" onclick="submitSiteFeedbackFrom(this)">提交反馈</button>
+      </div>
+    </div>`).join('');
+
+  add(`<h3>🎯 为你推荐的靠谱站点</h3>
+    ${r.note ? `<div class="warn warn-neutral"><span class="wt">检索提示</span>${escapeHtml(r.note)}</div>` : ''}
+    <div class="steps"><div class="h">▸ 执行链路（已对接后端 · 联网实时检索）</div>
+      <div class="s">① 需求解析 → 关键词提取：${escapeHtml(raw.slice(0, 18))}…</div>
+      <div class="s">② 违禁词库校验 → 通过，未命中违规类别</div>
+      <div class="s">③ POST /api/v1/site/search → 后端联网检索候选站点</div>
+      <div class="s">④ 域名解析 + HTTP 可访问性实测 → 打不开的站点已全部剔除</div>
+      <div class="s">⑤ 强制批量复测 → 本次实际复测 ${r.recheckCount || r.sites.length} 个，已剔除转高危站点，最终展示 ${r.sites.length} 个</div>
+    </div>
+    ${cards}
+    <div class="actions">
+      <button class="abtn" onclick="document.getElementById('ta').focus()">✏️ 重新描述需求</button>
+      <button class="abtn" data-name="" data-url="" onclick="submitSiteFeedbackFrom(this)">📝 提交反馈</button>
+      <button class="abtn" onclick="showScience('safe')">💡 该类网站常见风险科普</button>
+    </div>
+    <div class="disc">${E.DISCLAIMER}</div>`);
+}
+
+// 联网检索失败后的「重试」：复用本次的原需求重新检索一次。
+// 注意 run() 开头会清空输入框，所以这里先把需求写进 data-last-demand，
+// 重试时再填回去 —— 否则用户点重试会因为输入框空了而毫无反应。
+// 不用 location.reload()：那会刷新整个页面，丢掉对话历史与已有检测结果。
+function runRecommendAgain(btn) {
+  const ta = document.getElementById('ta');
+  if (!ta) return;
+  if (!ta.value.trim() && btn) {
+    ta.value = btn.getAttribute('data-last-demand') || '';
+  }
+  if (ta.value.trim()) run();
+  else ta.focus();
+}
+
+// ================= 站点库扩充：手动添加站点 =================
+function openAddSiteModal() {
+  $('addSiteName').value = '';
+  $('addSiteUrl').value = '';
+  $('addSiteTags').value = '';
+  $('addSiteSummary').value = '';
+  $('addSiteCategory').value = '';
+  $('addSiteHint').innerHTML = '提交后会自动校验：网址格式 → 违规词 → 域名合规 → 可访问性 → 安全风险，全部通过才收录。高危、盗版、打不开的链接会被拒绝。';
+  $('addSiteModal').classList.add('on');
+  $('addSiteName').focus();
+}
+function closeAddSiteModal() {
+  $('addSiteModal').classList.remove('on');
+}
+
+async function submitAddSite() {
+  const name = $('addSiteName').value.trim();
+  const url = $('addSiteUrl').value.trim();
+  const tags = $('addSiteTags').value.trim();
+  const summary = $('addSiteSummary').value.trim();
+  const category = $('addSiteCategory').value.trim();
+
+  if (!name) { $('addSiteHint').innerHTML = '<span style="color:var(--red)">请填写网站名称</span>'; return; }
+  if (!url) { $('addSiteHint').innerHTML = '<span style="color:var(--red)">请填写网址</span>'; return; }
+
+  const btn = $('addSiteSubmit');
+  btn.disabled = true;
+  $('addSiteHint').innerHTML = '正在校验并检测该站点（网址格式 / 违规词 / 可访问性 / 安全风险），请稍候…';
+
+  try {
+    const r = await E.postJSON('/site/add', { name, url, tags, summary, category });
+    if (r.code === 200 && r.data && r.data.ok) {
+      const s = r.data.site || {};
+      $('addSiteHint').innerHTML = (r.data.duplicated
+        ? '<span style="color:var(--ok-fg)">✅ 该站点已存在，已更新其信息：' + escapeHtml(s.name || name) + '</span>'
+        : '<span style="color:var(--ok-fg)">✅ 已成功收录站点：' + escapeHtml(s.name || name) + '（' + escapeHtml(s.url || url) + '）</span>');
+      // 清空输入，方便连续添加
+      $('addSiteName').value = '';
+      $('addSiteUrl').value = '';
+    } else {
+      $('addSiteHint').innerHTML = '<span style="color:var(--red)">❌ ' + escapeHtml((r.data && r.data.msg) || '添加失败') + '</span>';
+    }
+  } catch (e) {
+    $('addSiteHint').innerHTML = '<span style="color:var(--red)">❌ 无法连接后端，请确认服务已启动后重试</span>';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+</script>
+</body>
+</html>

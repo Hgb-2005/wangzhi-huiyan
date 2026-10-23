@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>网址慧眼 · 诊断页</title>
+<style>
+body{font-family:"Microsoft YaHei",sans-serif;background:#0d1117;color:#e6edf3;padding:24px;font-size:14px}
+h2{color:#58a6ff;font-size:16px;margin:20px 0 8px}
+button{background:#1f6feb;color:#fff;border:none;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:14px;margin-right:10px}
+button:hover{background:#2b7bf5}
+pre{background:#161b22;border:1px solid #2d333b;border-radius:6px;padding:12px;font-size:12.5px;
+    white-space:pre-wrap;word-break:break-all;max-height:220px;overflow:auto;color:#7ee787}
+.ok{color:#3fb950}.bad{color:#f85149}.warn{color:#d29922}
+.line{margin:5px 0;padding:6px 10px;border-radius:5px;background:#161b22;border-left:3px solid #58a6ff}
+</style>
+</head>
+<body>
+<h2>1️⃣ 脚本加载检测</h2>
+<div id="r1" class="line">检测中…</div>
+<button onclick="testEngine()">测试 engine.js</button>
+<button onclick="location.reload(true)">强制刷新本页</button>
+
+<h2>2️⃣ 后端连通检测</h2>
+<div id="r2" class="line">检测中…</div>
+<button onclick="testHealth()">测试 /health</button>
+
+<h2>3️⃣ 历史接口检测</h2>
+<div id="r3" class="line">检测中…</div>
+<button onclick="testHistory()">测试 /history/list</button>
+
+<h2>4️⃣ 检测接口检测</h2>
+<div id="r4" class="line">检测中…</div>
+<button onclick="testDetect()">测试 /url/detect</button>
+
+<h2>5️⃣ 缓存状态检测</h2>
+<div id="r5" class="line">检测中…</div>
+<div style="margin-top:10px;font-size:13px;color:#8b949e">
+  这一项能直接告诉你浏览器是不是在用旧缓存。
+  如果显示 ❌，说明前端服务不是用 <b>python serve.py</b> 启动的。
+</div>
+
+<pre id="log">就绪</pre>
+
+<script src="engine.js?t=20261022-4"></script>
+<script>
+// 用随机参数绕开所有缓存
+var TS = Date.now();
+// API 地址自适应：本地开发前端跑在 8899、后端 5000；线上前后端同源用相对路径
+var API = (location.port === '8899') ? 'http://127.0.0.1:5000/api/v1' : '/api/v1';
+
+function log(s){ document.getElementById('log').textContent += '\n' + s; }
+function set(id, ok, msg){
+  var el = document.getElementById(id);
+  el.className = 'line';
+  el.style.borderLeftColor = ok ? '#3fb950' : '#f85149';
+  el.innerHTML = (ok ? '<span class="ok">✅ 通过</span>' : '<span class="bad">❌ 失败</span>') + '　' + msg;
+}
+
+window.addEventListener('error', function(e){
+  log('[JS错误] ' + e.message + ' @ ' + e.filename + ':' + e.lineno);
+});
+
+// 1. engine.js
+function testEngine(){
+  var ok = !!window.WZH;
+  var keys = ok ? Object.keys(window.WZH).length : 0;
+  var hasBatch = ok && typeof window.WZH.batchDetect === 'function';
+  var hasParse = ok && typeof window.WZH.parseBatchInput === 'function';
+  set('r1', ok && hasBatch && hasParse,
+      ok ? ('window.WZH 已加载，导出 ' + keys + ' 项，batchDetect=' + hasBatch + '，parseBatchInput=' + hasParse)
+        : 'window.WZH 未定义 —— engine.js 没加载成功（可能缓存/插件拦截）');
+  log('[engine] WZH=' + ok + ' keys=' + keys);
+  // 实测预处理函数
+  if (hasParse) {
+    var r = window.WZH.parseBatchInput('https://a.com\n\n  b.com');
+    log('[engine] parseBatchInput 实测 => ' + JSON.stringify(r.urls));
+  }
+}
+
+// 2. health
+function testHealth(){
+  fetch(API + '/health?_=' + Date.now())
+    .then(function(r){ return r.json(); })
+    .then(function(d){ set('r2', d.code === 200, '后端正常，runMode=' + d.data.runMode); log('[health] ' + JSON.stringify(d.data)); })
+    .catch(function(e){ set('r2', false, '连接失败：' + e.message); log('[health错误] ' + e.message); });
+}
+
+// 3. history
+function testHistory(){
+  fetch(API + '/history/list?page=1&size=10&_=' + Date.now())
+    .then(function(r){ return r.json(); })
+    .then(function(d){ set('r3', d.code === 200, 'code=' + d.code + '，共 ' + d.data.total + ' 条记录'); log('[history] ' + JSON.stringify(d.data).slice(0, 300)); })
+    .catch(function(e){ set('r3', false, '连接失败：' + e.message); log('[history错误] ' + e.message); });
+}
+
+// 4. detect
+function testDetect(){
+  fetch(API + '/url/detect', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({url:['https://demo-notebook.org/'], saveHistory:false})
+  })
+    .then(function(r){ return r.json(); })
+    .then(function(d){ set('r4', d.code === 200, '检测接口正常，level=' + (d.data.results.level || '-') + '，label=' + (d.data.results.label || '-')); log('[detect] ' + JSON.stringify(d.data.results).slice(0, 300)); })
+    .catch(function(e){ set('r4', false, '连接失败：' + e.message); log('[detect错误] ' + e.message); });
+}
+
+// 5. 缓存检测：看服务器有没有发禁缓存响应头
+function testCache(){
+  // 用 HEAD 请求只取响应头，不下载文件内容
+  fetch('engine.js?_=' + Date.now(), {method:'HEAD', cache:'no-store'})
+    .then(function(r){
+      var cc = r.headers.get('Cache-Control') || '(无)';
+      var noStore = cc.indexOf('no-store') >= 0 || cc.indexOf('no-cache') >= 0;
+      set('r5', noStore,
+          'Cache-Control: ' + cc + '　|　X-Served-By: ' + (r.headers.get('X-Served-By') || '(无)'));
+      log('[cache] Cache-Control=' + cc);
+      log('[cache] Server=' + (r.headers.get('Server') || '(无)'));
+    })
+    .catch(function(e){
+      set('r5', false, '读取响应头失败：' + e.message);
+      log('[cache错误] ' + e.message);
+    });
+}
+
+// 页面加载自动全测
+window.addEventListener('load', function(){
+  testEngine(); testHealth(); testHistory(); testDetect(); testCache();
+});
+</script>
+</body>
+</html>

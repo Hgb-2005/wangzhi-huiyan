@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# 数据库（运行时自动生成，不提交本地测试数据）
+*.db
+database.db
+database.db.bak-*
+
+# WorkBuddy 项目数据 / 发布标记（与项目代码无关）
+.workbuddy/
+.wbapp_*.genie
+*.genie
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
